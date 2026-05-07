@@ -1,0 +1,83 @@
+global:
+  resolve_timeout: 5m
+  smtp_smarthost: 'localhost:587'
+  smtp_from: 'noc@datacenter.local'
+  smtp_require_tls: false
+
+route:
+  group_by: ['alertname', 'site', 'device']
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  receiver: 'default'
+  routes:
+    # P1 - Urgences : notification immédiate tous les canaux
+    - match:
+        severity: emergency
+      receiver: 'emergency'
+      repeat_interval: 15m
+      continue: true
+
+    # Criticités réseau
+    - match_re:
+        alertname: '^(NetworkDown|DeviceDown|LinkDown|BGPDown)$'
+      receiver: 'noc-team'
+      repeat_interval: 1h
+
+    # Problèmes alimentation
+    - match_re:
+        alertname: '^(UPSBatteryLow|GeneratorFail|PowerFailure)$'
+      receiver: 'noc-team'
+      repeat_interval: 30m
+
+    # SOC — sécurité
+    - match:
+        team: soc
+      receiver: 'soc-team'
+      repeat_interval: 1h
+
+receivers:
+  - name: 'default'
+    email_configs:
+      - to: 'noc@datacenter.local'
+        send_resolved: true
+
+  - name: 'emergency'
+    email_configs:
+      - to: 'astreinte@datacenter.local'
+        send_resolved: true
+    slack_configs:
+      - api_url: 'YOUR_SLACK_WEBHOOK_URL'
+        channel: '#noc-urgences'
+        title: '🚨 URGENCE: {{ .GroupLabels.alertname }}'
+        text: '{{ range .Alerts }}{{ .Annotations.description }}{{ end }}'
+        send_resolved: true
+    pagerduty_configs:
+      - routing_key: 'YOUR_PAGERDUTY_KEY'
+        severity: 'critical'
+
+  - name: 'noc-team'
+    email_configs:
+      - to: 'noc-team@datacenter.local'
+        send_resolved: true
+    slack_configs:
+      - api_url: 'YOUR_SLACK_WEBHOOK_URL'
+        channel: '#noc-alertes'
+        send_resolved: true
+
+  - name: 'soc-team'
+    email_configs:
+      - to: 'soc-team@datacenter.local'
+        send_resolved: true
+    slack_configs:
+      - api_url: 'YOUR_SLACK_WEBHOOK_URL'
+        channel: '#soc-alertes'
+        send_resolved: true
+
+inhibit_rules:
+  # Si le site primaire est down, inhiber les alertes des équipements du même site
+  - source_match:
+      alertname: 'SitePrimaryDown'
+    target_match_re:
+      site: 'primary'
+    equal: ['datacenter']

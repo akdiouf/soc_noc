@@ -1,0 +1,122 @@
+{
+  "title": "NOC — Vue d'ensemble",
+  "uid": "noc-overview",
+  "tags": ["noc", "overview"],
+  "timezone": "browser",
+  "refresh": "30s",
+  "panels": [
+    {
+      "id": 1,
+      "title": "Équipements par statut",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "count(up == 1)",
+          "legendFormat": "UP"
+        }
+      ],
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "reduceOptions": { "calcs": ["lastNotNull"] }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 1 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 2,
+      "title": "CPU moyen — Serveurs",
+      "type": "gauge",
+      "gridPos": { "h": 6, "w": 6, "x": 6, "y": 0 },
+      "targets": [
+        {
+          "datasource": "InfluxDB",
+          "query": "from(bucket: \"metrics\") |> range(start: -5m) |> filter(fn: (r) => r._field == \"cpu_percent\") |> mean()",
+          "legendFormat": "CPU %"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 70 },
+              { "color": "red", "value": 90 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 3,
+      "title": "Température salles — Toutes sondes",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
+      "targets": [
+        {
+          "datasource": "InfluxDB",
+          "query": "from(bucket: \"metrics\") |> range(start: -1h) |> filter(fn: (r) => r._measurement == \"environmental\" and r._field == \"return_air_temp\") |> aggregateWindow(every: 1m, fn: mean)",
+          "legendFormat": "{{device_name}} ({{room}})"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "celsius",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "blue", "value": null },
+              { "color": "green", "value": 18 },
+              { "color": "yellow", "value": 28 },
+              { "color": "red", "value": 35 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 4,
+      "title": "Charge UPS — Tous onduleurs",
+      "type": "bargauge",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 6 },
+      "targets": [
+        {
+          "datasource": "InfluxDB",
+          "query": "from(bucket: \"metrics\") |> range(start: -5m) |> filter(fn: (r) => r._measurement == \"ups_metrics\" and r._field == \"output_load\") |> last()",
+          "legendFormat": "{{device_name}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 70 },
+              { "color": "red", "value": 90 }
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "schemaVersion": 38
+}

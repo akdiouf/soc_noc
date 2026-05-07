@@ -1,0 +1,145 @@
+# Configuration SNMP Exporter
+# Modules pour différents types d'équipements
+
+modules:
+  # ─── Interfaces réseau (IF-MIB standard) ──────────────────────────────────
+  if_mib:
+    walk:
+      - sysUpTime
+      - interfaces
+      - ifXTable
+    version: 2
+    auth:
+      community: public
+    metrics:
+      - name: sysUpTime
+        oid: 1.3.6.1.2.1.1.3.0
+        type: gauge
+        help: Temps de fonctionnement du système en centièmes de seconde
+      - name: ifOperStatus
+        oid: 1.3.6.1.2.1.2.2.1.8
+        type: gauge
+        help: Statut opérationnel de l'interface (1=up, 2=down)
+        indexes:
+          - labelname: ifIndex
+            type: gauge
+        lookups:
+          - labels: [ifIndex]
+            labelname: ifDescr
+            oid: 1.3.6.1.2.1.2.2.1.2
+            type: DisplayString
+      - name: ifInOctets
+        oid: 1.3.6.1.2.1.2.2.1.10
+        type: counter
+        help: Octets reçus sur l'interface
+        indexes:
+          - labelname: ifIndex
+            type: gauge
+        lookups:
+          - labels: [ifIndex]
+            labelname: ifDescr
+            oid: 1.3.6.1.2.1.2.2.1.2
+            type: DisplayString
+      - name: ifOutOctets
+        oid: 1.3.6.1.2.1.2.2.1.16
+        type: counter
+        help: Octets envoyés sur l'interface
+        indexes:
+          - labelname: ifIndex
+            type: gauge
+      - name: ifInErrors
+        oid: 1.3.6.1.2.1.2.2.1.14
+        type: counter
+        help: Erreurs reçues
+        indexes:
+          - labelname: ifIndex
+            type: gauge
+      - name: ifOutErrors
+        oid: 1.3.6.1.2.1.2.2.1.20
+        type: counter
+        help: Erreurs envoyées
+        indexes:
+          - labelname: ifIndex
+            type: gauge
+
+  # ─── UPS (RFC 1628) ─────────────────────────────────────────────────────────
+  ups:
+    walk:
+      - upsIdent
+      - upsBattery
+      - upsInput
+      - upsOutput
+    version: 2
+    auth:
+      community: public
+    metrics:
+      - name: upsEstimatedChargeRemaining
+        oid: 1.3.6.1.2.1.33.1.2.4.0
+        type: gauge
+        help: Charge batterie estimée en pourcentage
+      - name: upsEstimatedMinutesRemaining
+        oid: 1.3.6.1.2.1.33.1.2.3.0
+        type: gauge
+        help: Autonomie estimée en minutes
+      - name: upsBatteryVoltage
+        oid: 1.3.6.1.2.1.33.1.2.5.0
+        type: gauge
+        help: Tension batterie en 0.1V
+      - name: upsBatteryTemperature
+        oid: 1.3.6.1.2.1.33.1.2.7.0
+        type: gauge
+        help: Température batterie en degrés Celsius
+      - name: upsOutputSource
+        oid: 1.3.6.1.2.1.33.1.4.1.0
+        type: gauge
+        help: Source de sortie (3=normal, 5=battery, 7=bypass)
+      - name: upsOutputPercentLoad
+        oid: 1.3.6.1.2.1.33.1.4.4.1.5
+        type: gauge
+        help: Charge de sortie en pourcentage
+        indexes:
+          - labelname: upsOutputLineIndex
+            type: gauge
+      - name: upsOutputVoltage
+        oid: 1.3.6.1.2.1.33.1.4.4.1.2
+        type: gauge
+        help: Tension de sortie en Volts
+        indexes:
+          - labelname: upsOutputLineIndex
+            type: gauge
+
+  # ─── APC spécifique (NetSNMP APC) ─────────────────────────────────────────
+  apc_ups:
+    walk:
+      - 1.3.6.1.4.1.318.1.1.1
+      - 1.3.6.1.4.1.318.1.1.10
+    version: 2
+    auth:
+      community: public
+    metrics:
+      - name: apcBatteryCapacity
+        oid: 1.3.6.1.4.1.318.1.1.1.2.2.1.0
+        type: gauge
+        help: APC — Capacité batterie en pourcentage
+      - name: apcBatteryTemperature
+        oid: 1.3.6.1.4.1.318.1.1.1.2.2.2.0
+        type: gauge
+        help: APC — Température batterie
+      - name: apcUPSStatus
+        oid: 1.3.6.1.4.1.318.1.1.1.4.1.1.0
+        type: gauge
+        help: APC — Statut UPS
+      - name: apcEnvironmentTemperature
+        oid: 1.3.6.1.4.1.318.1.1.10.2.3.2.1.4
+        type: gauge
+        help: APC — Température ambiante sonde
+        indexes:
+          - labelname: sensorIndex
+            type: gauge
+      - name: apcEnvironmentHumidity
+        oid: 1.3.6.1.4.1.318.1.1.10.2.3.2.1.6
+        type: gauge
+        help: APC — Humidité ambiante sonde
+        indexes:
+          - labelname: sensorIndex
+            type: gauge

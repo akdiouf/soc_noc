@@ -1,0 +1,142 @@
+groups:
+  - name: noc.availability
+    interval: 30s
+    rules:
+      # Équipement inaccessible
+      - alert: DeviceDown
+        expr: up == 0
+        for: 2m
+        labels:
+          severity: critical
+          team: noc
+        annotations:
+          summary: "Équipement {{ $labels.instance }} inaccessible"
+          description: "{{ $labels.instance }} ne répond plus depuis 2 minutes"
+
+      # Interface réseau down
+      - alert: InterfaceDown
+        expr: ifOperStatus{ifOperStatus!="1"} == 2
+        for: 1m
+        labels:
+          severity: warning
+          team: noc
+        annotations:
+          summary: "Interface {{ $labels.ifDescr }} sur {{ $labels.instance }} est DOWN"
+
+      # Erreurs réseau élevées
+      - alert: HighInterfaceErrors
+        expr: rate(ifInErrors[5m]) + rate(ifOutErrors[5m]) > 100
+        for: 5m
+        labels:
+          severity: warning
+          team: noc
+        annotations:
+          summary: "Erreurs réseau élevées sur {{ $labels.instance }} — {{ $labels.ifDescr }}"
+
+  - name: noc.performance
+    interval: 60s
+    rules:
+      # CPU serveur critique
+      - alert: HighCPU
+        expr: 100 - (avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 90
+        for: 10m
+        labels:
+          severity: critical
+          team: noc
+        annotations:
+          summary: "CPU élevé sur {{ $labels.instance }}: {{ $value | humanize }}%"
+
+      # Mémoire faible
+      - alert: LowMemory
+        expr: (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * 100 < 10
+        for: 5m
+        labels:
+          severity: critical
+          team: noc
+        annotations:
+          summary: "Mémoire faible sur {{ $labels.instance }}: {{ $value | humanize }}% disponible"
+
+      # Disque presque plein
+      - alert: DiskAlmostFull
+        expr: (node_filesystem_avail_bytes{fstype!~"tmpfs|fuse.lxcfs"} / node_filesystem_size_bytes) * 100 < 10
+        for: 5m
+        labels:
+          severity: critical
+          team: noc
+        annotations:
+          summary: "Disque presque plein sur {{ $labels.instance }} ({{ $labels.mountpoint }}): {{ $value | humanize }}% disponible"
+
+  - name: noc.power
+    interval: 30s
+    rules:
+      # Batterie UPS faible
+      - alert: UPSBatteryLow
+        expr: upsEstimatedChargeRemaining < 30
+        for: 2m
+        labels:
+          severity: warning
+          team: noc
+        annotations:
+          summary: "Batterie UPS faible sur {{ $labels.instance }}: {{ $value }}%"
+
+      # Batterie UPS critique
+      - alert: UPSBatteryCritical
+        expr: upsEstimatedChargeRemaining < 15
+        for: 1m
+        labels:
+          severity: critical
+          team: noc
+        annotations:
+          summary: "CRITIQUE: Batterie UPS sur {{ $labels.instance }}: {{ $value }}%"
+
+      # UPS sur batterie
+      - alert: UPSOnBattery
+        expr: upsOutputSource == 5
+        for: 30s
+        labels:
+          severity: critical
+          team: noc
+        annotations:
+          summary: "UPS {{ $labels.instance }} fonctionne sur batterie — panne secteur!"
+
+      # Surcharge UPS
+      - alert: UPSOverloaded
+        expr: upsOutputPercentLoad > 90
+        for: 3m
+        labels:
+          severity: warning
+          team: noc
+        annotations:
+          summary: "UPS {{ $labels.instance }} surchargé: {{ $value }}%"
+
+  - name: noc.temperature
+    interval: 60s
+    rules:
+      # Température salle informatique élevée
+      - alert: RoomTemperatureHigh
+        expr: room_temperature_celsius > 30
+        for: 5m
+        labels:
+          severity: warning
+          team: noc
+        annotations:
+          summary: "Température élevée dans {{ $labels.room }}: {{ $value }}°C"
+
+      - alert: RoomTemperatureCritical
+        expr: room_temperature_celsius > 40
+        for: 2m
+        labels:
+          severity: emergency
+          team: noc
+        annotations:
+          summary: "URGENCE: Température critique dans {{ $labels.room }}: {{ $value }}°C"
+
+      # Humidité
+      - alert: HumidityOutOfRange
+        expr: room_humidity_percent < 40 or room_humidity_percent > 70
+        for: 10m
+        labels:
+          severity: warning
+          team: noc
+        annotations:
+          summary: "Humidité hors plage dans {{ $labels.room }}: {{ $value }}%"

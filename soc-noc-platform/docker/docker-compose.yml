@@ -1,0 +1,448 @@
+#version: "3.9"
+
+networks:
+  soc_noc_net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+volumes:
+  postgres_data:
+  influxdb_data:
+  redis_data:
+  kafka_data:
+  zookeeper_data:
+  elasticsearch_data:
+  grafana_data:
+  prometheus_data:
+  wazuh_data:
+  netbox_data:
+
+services:
+  # ─────────────────────────────────────────────
+  # DATABASES
+  # ─────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: soc_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: socnoc
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-SecureP@ss123}
+      POSTGRES_DB: socnoc_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-scripts/postgres:/docker-entrypoint-initdb.d
+    ports:
+      - "5432:5432"
+    networks:
+      soc_noc_net:
+        ipv4_address: 172.20.0.10
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U socnoc -d socnoc_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  influxdb:
+    image: influxdb:2.7-alpine
+    container_name: soc_influxdb
+    restart: unless-stopped
+    environment:
+      DOCKER_INFLUXDB_INIT_MODE: setup
+      DOCKER_INFLUXDB_INIT_USERNAME: admin
+      DOCKER_INFLUXDB_INIT_PASSWORD: ${INFLUXDB_PASSWORD:-SecureP@ss123}
+      DOCKER_INFLUXDB_INIT_ORG: socnoc
+      DOCKER_INFLUXDB_INIT_BUCKET: metrics
+      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: ${INFLUXDB_TOKEN:-my-super-secret-token}
+    volumes:
+      - influxdb_data:/var/lib/influxdb2
+    ports:
+      - "8086:8086"
+    networks:
+      soc_noc_net:
+        ipv4_address: 172.20.0.11
+
+  redis:
+    image: redis:7-alpine
+    container_name: soc_redis
+    restart: unless-stopped
+    command: redis-server --requirepass ${REDIS_PASSWORD:-SecureP@ss123}
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    networks:
+      soc_noc_net:
+        ipv4_address: 172.20.0.12
+
+  # ─────────────────────────────────────────────
+  # MESSAGE BROKER
+  # ─────────────────────────────────────────────
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: soc_zookeeper
+    restart: unless-stopped
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    volumes:
+      - zookeeper_data:/var/lib/zookeeper
+    networks:
+      soc_noc_net:
+        ipv4_address: 172.20.0.13
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: soc_kafka
+    restart: unless-stopped
+    depends_on:
+      - zookeeper
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    volumes:
+      - kafka_data:/var/lib/kafka
+    ports:
+      - "29092:29092"
+    networks:
+      soc_noc_net:
+        ipv4_address: 172.20.0.14
+
+  # ─────────────────────────────────────────────
+  # LOG MANAGEMENT (ELK STACK)
+  # ─────────────────────────────────────────────
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
+    container_name: soc_elasticsearch
+    restart: unless-stopped
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms1g -Xmx1g"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    ports:
+      - "9200:9200"
+    networks:
+      soc_noc_net:
+        ipv4_address: 172.20.0.20
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+
+  logstash:
+    image: docker.elastic.co/logstash/logstash:8.11.0
+    container_name: soc_logstash
+    restart: unless-stopped
+    depends_on:
+      - elasticsearch
+      - kafka
+    volumes:
+      - ./logstash/pipeline:/usr/share/logstash/pipeline
+      - ./logstash/config:/usr/share/logstash/config
+    ports:
+      - "5044:5044"
+      - "5140:5140/udp"   # Syslog UDP
+      - "5140:5140/tcp"   # Syslog TCP
+    networks:
+      soc_noc_net:
+        ipv4_address: 172.20.0.21
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.11.0
+    container_name: soc_kibana
+    restart: unless-stopped
+    depends_on:
+      - elasticsearch
+    environment:
+      ELASTICSEARCH_HOSTS: http://elasticsearch:9200
+    ports:
+      - "5601:5601"
+    networks:
+      soc_noc_net:
+        ipv4_address: 172.20.0.22
+
+  # ─────────────────────────────────────────────
+  # METRICS (PROMETHEUS + GRAFANA)
+  # ─────────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:v2.48.0
+    container_name: soc_prometheus
+    restart: unless-stopped
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.console.libraries=/etc/prometheus/console_libraries"
+      - "--web.console.templates=/etc/prometheus/consoles"
+      - "--web.enable-lifecycle"
+      - "--storage.tsdb.retention.time=90d"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./prometheus/rules:/etc/prometheus/rules
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    networks:
+      soc_noc_net:
+        ipv4_address: 172.20.0.30
+
+  alertmanager:
+    image: prom/alertmanager:v0.26.0
+    container_name: soc_alertmanager
+    restart: unless-stopped
+    volumes:
+      - ./prometheus/alertmanager.yml:/etc/alertmanager/alertmanager.yml
+    ports:
+      - "9093:9093"
+    networks:
+      soc_noc_net:
+        ipv4_address: 172.20.0.31
+
+  grafana:
+    image: grafana/grafana:10.2.0
+    container_name: soc_grafana
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+      - influxdb
+      - elasticsearch
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-SecureP@ss123}
+      GF_INSTALL_PLUGINS: grafana-worldmap-panel,grafana-piechart-panel,grafana-clock-panel,grafana-statusmap-panel,natel-discrete-panel
+      GF_FEATURE_TOGGLES_ENABLE: publicDashboards
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning
+    ports:
+      - "3000:3000"
+    networks:
+      soc_noc_net:
+        ipv4_address: 172.20.0.32
+
+  # ─────────────────────────────────────────────
+  # SNMP EXPORTER (Réseau + Physique)
+  # ─────────────────────────────────────────────
+  snmp-exporter:
+    image: prom/snmp-exporter:v0.24.0
+    container_name: soc_snmp_exporter
+    restart: unless-stopped
+    volumes:
+      - ./snmp-exporter/snmp.yml:/etc/snmp_exporter/snmp.yml
+    ports:
+      - "9116:9116"
+    networks:
+      soc_noc_net:
+        ipv4_address: 172.20.0.33
+
+  # ─────────────────────────────────────────────
+  # CMDB (NETBOX)
+  # ─────────────────────────────────────────────
+  netbox:
+    image: netboxcommunity/netbox:v3.7-2.8.0
+    container_name: soc_netbox
+    restart: unless-stopped
+    depends_on:
+      - postgres
+      - redis
+    environment:
+      SUPERUSER_NAME: admin
+      SUPERUSER_EMAIL: admin@datacenter.local
+      SUPERUSER_PASSWORD: ${NETBOX_PASSWORD:-SecureP@ss123}
+      ALLOWED_HOSTS: "*"
+      DB_HOST: postgres
+      DB_NAME: netbox
+      DB_USER: socnoc
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-SecureP@ss123}
+      REDIS_HOST: redis
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-SecureP@ss123}
+      SECRET_KEY: ${NETBOX_SECRET_KEY:-supersecretkey1234567890abcdef}
+    ports:
+      - "8080:8080"
+    networks:
+      soc_noc_net:
+        ipv4_address: 172.20.0.40
+
+  # ─────────────────────────────────────────────
+  # SOC - WAZUH SIEM
+  # ─────────────────────────────────────────────
+  wazuh-manager:
+    image: wazuh/wazuh-manager:4.7.0
+    container_name: soc_wazuh_manager
+    restart: unless-stopped
+    environment:
+      WAZUH_MANAGER_CONF: /wazuh-config-mount/etc/ossec.conf
+    volumes:
+      - wazuh_data:/var/ossec/data
+      - ./wazuh/config:/wazuh-config-mount/etc
+    ports:
+      - "1514:1514/udp"
+      - "1515:1515"
+      - "55000:55000"
+    networks:
+      soc_noc_net:
+        ipv4_address: 172.20.0.50
+
+  # ─────────────────────────────────────────────
+  # SOC - INCIDENT RESPONSE
+  # ─────────────────────────────────────────────
+  thehive:
+    image: strangebee/thehive:5.2
+    container_name: soc_thehive
+    restart: unless-stopped
+    depends_on:
+      - elasticsearch
+    environment:
+      - JVM_OPTS=-Xms512m -Xmx1g
+    ports:
+      - "9000:9000"
+    networks:
+      soc_noc_net:
+        ipv4_address: 172.20.0.60
+
+  cortex:
+    image: thehiveproject/cortex:3.1.7
+    container_name: soc_cortex
+    restart: unless-stopped
+    depends_on:
+      - elasticsearch
+    environment:
+      - JVM_OPTS=-Xms512m -Xmx1g
+    ports:
+      - "9001:9001"
+    networks:
+      soc_noc_net:
+        ipv4_address: 172.20.0.61
+
+  # ─────────────────────────────────────────────
+  # SOC - SOAR (SHUFFLE)
+  # ─────────────────────────────────────────────
+  shuffle-backend:
+    image: ghcr.io/shuffle/shuffle-backend:latest
+    container_name: soc_shuffle_backend
+    restart: unless-stopped
+    environment:
+      DATASTORE_EMULATOR_HOST: shuffle-database:8000
+      SHUFFLE_APP_HOTLOAD_FOLDER: /shuffle-apps
+      SHUFFLE_FILE_LOCATION: /shuffle-files
+      ORG_ID: Shuffle
+      SHUFFLE_DEFAULT_USERNAME: admin
+      SHUFFLE_DEFAULT_PASSWORD: ${SHUFFLE_PASSWORD:-SecureP@ss123}
+    ports:
+      - "5001:5001"
+    networks:
+      soc_noc_net:
+        ipv4_address: 172.20.0.70
+
+  # ─────────────────────────────────────────────
+  # BACKEND (SOC/NOC API)
+  # ─────────────────────────────────────────────
+  backend:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    container_name: soc_backend
+    restart: unless-stopped
+    depends_on:
+      - postgres
+      - redis
+      - kafka
+      - influxdb
+    environment:
+      DATABASE_URL: postgresql+asyncpg://socnoc:${POSTGRES_PASSWORD:-SecureP@ss123}@postgres:5432/socnoc_db
+      INFLUXDB_URL: http://influxdb:8086
+      INFLUXDB_TOKEN: ${INFLUXDB_TOKEN:-my-super-secret-token}
+      INFLUXDB_ORG: socnoc
+      INFLUXDB_BUCKET: metrics
+      REDIS_URL: redis://:${REDIS_PASSWORD:-SecureP@ss123}@redis:6379/0
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      SECRET_KEY: ${SECRET_KEY:-your-secret-key-here}
+      ENVIRONMENT: development
+    ports:
+      - "8000:8000"
+    volumes:
+      - ../backend/app:/app/app
+    networks:
+      soc_noc_net:
+        ipv4_address: 172.20.0.80
+
+  celery-worker:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    container_name: soc_celery_worker
+    restart: unless-stopped
+    command: celery -A app.tasks.celery_app worker --loglevel=info --concurrency=4
+    depends_on:
+      - postgres
+      - redis
+      - kafka
+    environment:
+      DATABASE_URL: postgresql+asyncpg://socnoc:${POSTGRES_PASSWORD:-SecureP@ss123}@postgres:5432/socnoc_db
+      INFLUXDB_URL: http://influxdb:8086
+      INFLUXDB_TOKEN: ${INFLUXDB_TOKEN:-my-super-secret-token}
+      REDIS_URL: redis://:${REDIS_PASSWORD:-SecureP@ss123}@redis:6379/0
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    networks:
+      soc_noc_net:
+        ipv4_address: 172.20.0.81
+
+  celery-beat:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    container_name: soc_celery_beat
+    restart: unless-stopped
+    command: celery -A app.tasks.celery_app beat --loglevel=info
+    depends_on:
+      - redis
+    environment:
+      REDIS_URL: redis://:${REDIS_PASSWORD:-SecureP@ss123}@redis:6379/0
+    networks:
+      soc_noc_net:
+        ipv4_address: 172.20.0.82
+
+  # ─────────────────────────────────────────────
+  # FRONTEND
+  # ─────────────────────────────────────────────
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+    container_name: soc_frontend
+    restart: unless-stopped
+    ports:
+      - "3001:80"
+    networks:
+      soc_noc_net:
+        ipv4_address: 172.20.0.90
+
+  # ─────────────────────────────────────────────
+  # REVERSE PROXY
+  # ─────────────────────────────────────────────
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: soc_nginx
+    restart: unless-stopped
+    depends_on:
+      - backend
+      - frontend
+      - grafana
+      - kibana
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ./nginx/ssl:/etc/nginx/ssl
+    ports:
+      - "80:80"
+      - "443:443"
+    networks:
+      soc_noc_net:
+        ipv4_address: 172.20.0.100

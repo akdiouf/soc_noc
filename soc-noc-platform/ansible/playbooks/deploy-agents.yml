@@ -1,0 +1,178 @@
+---
+# Playbook de déploiement des agents de monitoring sur les serveurs
+# Usage: ansible-playbook -i inventory/hosts.yml playbooks/deploy-agents.yml
+
+- name: Déployer les agents de monitoring sur les serveurs Linux
+  hosts: linux_servers
+  become: yes
+  gather_facts: yes
+
+  vars:
+    prometheus_node_exporter_version: "1.7.0"
+    filebeat_version: "8.11.0"
+    wazuh_agent_version: "4.7.0"
+    noc_backend_ip: "{{ groups['noc_platform'][0] }}"
+
+  tasks:
+    # ─── Node Exporter (métriques système) ────────────────────────────────────
+    - name: Créer l'utilisateur node_exporter
+      user:
+        name: node_exporter
+        system: yes
+        shell: /bin/false
+        create_home: no
+
+    - name: Télécharger Node Exporter
+      get_url:
+        url: "https://github.com/prometheus/node_exporter/releases/download/v{{ prometheus_node_exporter_version }}/node_exporter-{{ prometheus_node_exporter_version }}.linux-amd64.tar.gz"
+        dest: /tmp/node_exporter.tar.gz
+        mode: '0644'
+
+    - name: Extraire Node Exporter
+      unarchive:
+        src: /tmp/node_exporter.tar.gz
+        dest: /usr/local/bin/
+        remote_src: yes
+        extra_opts: ["--strip-components=1"]
+        include:
+          - "node_exporter-{{ prometheus_node_exporter_version }}.linux-amd64/node_exporter"
+
+    - name: Service systemd pour Node Exporter
+      copy:
+        dest: /etc/systemd/system/node_exporter.service
+        content: |
+          [Unit]
+          Description=Prometheus Node Exporter
+          After=network.target
+
+          [Service]
+          User=node_exporter
+          ExecStart=/usr/local/bin/node_exporter \
+            --collector.systemd \
+            --collector.processes \
+            --collector.tcpstat \
+            --web.listen-address=:9100
+          Restart=always
+          RestartSec=5
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Démarrer Node Exporter
+      systemd:
+        name: node_exporter
+        state: started
+        enabled: yes
+        daemon_reload: yes
+
+    # ─── Filebeat (envoi des logs) ─────────────────────────────────────────────
+    - name: Installer Filebeat
+      package:
+        name: filebeat
+        state: present
+      when: ansible_os_family == "Debian"
+
+    - name: Configurer Filebeat
+      copy:
+        dest: /etc/filebeat/filebeat.yml
+        content: |
+          filebeat.inputs:
+            - type: log
+              enabled: true
+              paths:
+                - /var/log/*.log
+                - /var/log/syslog
+                - /var/log/auth.log
+              fields:
+                host_type: linux_server
+                site: "{{ site | default('primary') }}"
+
+            - type: log
+              enabled: true
+              paths:
+                - /var/log/nginx/*.log
+              fields:
+                service: nginx
+
+          output.logstash:
+            hosts: ["{{ noc_backend_ip }}:5044"]
+
+          logging.level: warning
+      notify: restart filebeat
+
+    - name: Démarrer Filebeat
+      systemd:
+        name: filebeat
+        state: started
+        enabled: yes
+
+    # ─── Wazuh Agent (SIEM) ────────────────────────────────────────────────────
+    - name: Ajouter le repo Wazuh
+      get_url:
+        url: https://packages.wazuh.com/key/GPG-KEY-WAZUH
+        dest: /usr/share/keyrings/wazuh.gpg
+        mode: '0644'
+
+    - name: Installer Wazuh Agent
+      package:
+        name: wazuh-agent
+        state: present
+
+    - name: Configurer le Wazuh Agent
+      lineinfile:
+        path: /var/ossec/etc/ossec.conf
+        regexp: '<address>.*</address>'
+        line: "    <address>{{ noc_backend_ip }}</address>"
+
+    - name: Enregistrer l'agent Wazuh
+      command: >
+        /var/ossec/bin/agent-auth
+        -m {{ noc_backend_ip }}
+        -A {{ inventory_hostname }}
+      args:
+        creates: /var/ossec/etc/client.keys
+
+    - name: Démarrer Wazuh Agent
+      systemd:
+        name: wazuh-agent
+        state: started
+        enabled: yes
+
+  handlers:
+    - name: restart filebeat
+      systemd:
+        name: filebeat
+        state: restarted
+
+# ─── Équipements réseau (SNMP) ─────────────────────────────────────────────────
+- name: Configurer SNMP sur les équipements réseau Cisco
+  hosts: cisco_devices
+  gather_facts: no
+  connection: network_cli
+
+  tasks:
+    - name: Activer SNMP v3 sur Cisco
+      ios_config:
+        lines:
+          - "snmp-server group NOC_GROUP v3 priv"
+          - "snmp-server user noc_monitor NOC_GROUP v3 auth sha {{ snmp_auth_password }} priv aes 128 {{ snmp_priv_password }}"
+          - "snmp-server host {{ noc_backend_ip }} version 3 priv noc_monitor"
+          - "snmp-server enable traps"
+        save_when: modified
+
+    - name: Activer NetFlow v5
+      ios_config:
+        lines:
+          - "ip flow-export version 5"
+          - "ip flow-export destination {{ noc_backend_ip }} 2055"
+          - "ip flow-cache timeout active 1"
+          - "ip flow-cache timeout inactive 15"
+        save_when: modified
+
+    - name: Activer Syslog
+      ios_config:
+        lines:
+          - "logging host {{ noc_backend_ip }} transport udp port 514"
+          - "logging trap informational"
+          - "service timestamps log datetime msec"
+        save_when: modified

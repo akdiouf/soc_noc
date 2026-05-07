@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(chmod +x /home/abdoukarimdiouf/circulation/soc-noc-platform/scripts/start.sh)",
+      "Bash(chmod +x /home/abdoukarimdiouf/circulation/soc-noc-platform/scripts/*.sh)"
+    ]
+  }
+}
