@@ -78,4 +78,4 @@ class IncidentListResponse(BaseModel):
 class TimelineEntryCreate(BaseModel):
     event_type: str
     message: str
-    metadata: Optional[dict] = None
+    extra_data: Optional[dict] = None

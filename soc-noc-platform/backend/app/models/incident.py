@@ -116,7 +116,7 @@ class IncidentTimeline(Base):
     message = Column(Text, nullable=False)
     author_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
     author_name = Column(String(255))
-    metadata = Column(JSON, default=dict)
+    extra_data = Column("metadata", JSON, default=dict)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     incident = relationship("Incident", back_populates="timeline")

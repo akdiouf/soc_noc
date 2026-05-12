@@ -21,7 +21,7 @@ class NetworkLink(Base):
     is_redundant = Column(Boolean, default=False)
 
     # Position visuelle pour la topologie
-    metadata = Column(JSON, default=dict)
+    extra_data = Column("metadata", JSON, default=dict)
 
     source_device = relationship("Device", foreign_keys=[source_device_id], back_populates="links_source")
     target_device = relationship("Device", foreign_keys=[target_device_id], back_populates="links_target")

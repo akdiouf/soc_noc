@@ -17,7 +17,9 @@ volumes:
   grafana_data:
   prometheus_data:
   wazuh_data:
+  wazuh_indexer_data:
   netbox_data:
+  shuffle_opensearch_data:
 
 services:
   # ─────────────────────────────────────────────
@@ -29,7 +31,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: socnoc
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-SecureP@ss123}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-SecurePass123}
       POSTGRES_DB: socnoc_db
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -217,7 +219,7 @@ services:
     environment:
       GF_SECURITY_ADMIN_USER: admin
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-SecureP@ss123}
-      GF_INSTALL_PLUGINS: grafana-worldmap-panel,grafana-piechart-panel,grafana-clock-panel,grafana-statusmap-panel,natel-discrete-panel
+      GF_INSTALL_PLUGINS: grafana-worldmap-panel,grafana-piechart-panel,grafana-clock-panel
       GF_FEATURE_TOGGLES_ENABLE: publicDashboards
     volumes:
       - grafana_data:/var/lib/grafana
@@ -261,7 +263,7 @@ services:
       DB_HOST: postgres
       DB_NAME: netbox
       DB_USER: socnoc
-      DB_PASSWORD: ${POSTGRES_PASSWORD:-SecureP@ss123}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-SecurePass123}
       REDIS_HOST: redis
       REDIS_PASSWORD: ${REDIS_PASSWORD:-SecureP@ss123}
       SECRET_KEY: ${NETBOX_SECRET_KEY:-supersecretkey1234567890abcdef}
@@ -274,12 +276,42 @@ services:
   # ─────────────────────────────────────────────
   # SOC - WAZUH SIEM
   # ─────────────────────────────────────────────
+  wazuh-indexer:
+    image: wazuh/wazuh-indexer:4.7.0
+    container_name: soc_wazuh_indexer
+    restart: unless-stopped
+    environment:
+      OPENSEARCH_JAVA_OPTS: "-Xms512m -Xmx512m"
+      bootstrap.memory_lock: "true"
+      INDEXER_PASSWORD: ${WAZUH_INDEXER_PASSWORD:-WazuhAdmin123!}
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    volumes:
+      - wazuh_indexer_data:/var/lib/wazuh-indexer
+      - ./wazuh/opensearch-security/internal_users.yml:/usr/share/wazuh-indexer/opensearch-security/internal_users.yml:ro
+    networks:
+      soc_noc_net:
+        ipv4_address: 172.20.0.51
+        aliases:
+          - wazuh.indexer
+
   wazuh-manager:
     image: wazuh/wazuh-manager:4.7.0
     container_name: soc_wazuh_manager
     restart: unless-stopped
+    depends_on:
+      - wazuh-indexer
     environment:
       WAZUH_MANAGER_CONF: /wazuh-config-mount/etc/ossec.conf
+      INDEXER_URL: https://wazuh.indexer:9200
+      INDEXER_USERNAME: admin
+      INDEXER_PASSWORD: ${WAZUH_INDEXER_PASSWORD:-WazuhAdmin123!}
+      FILEBEAT_SSL_VERIFICATION_MODE: none
     volumes:
       - wazuh_data:/var/ossec/data
       - ./wazuh/config:/wazuh-config-mount/etc
@@ -325,14 +357,41 @@ services:
   # ─────────────────────────────────────────────
   # SOC - SOAR (SHUFFLE)
   # ─────────────────────────────────────────────
+  shuffle-opensearch:
+    image: opensearchproject/opensearch:2.11.0
+    container_name: shuffle-opensearch
+    hostname: shuffle-opensearch
+    restart: unless-stopped
+    environment:
+      - "discovery.type=single-node"
+      - "OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m"
+      - "DISABLE_INSTALL_DEMO_CONFIG=true"
+      - "DISABLE_SECURITY_PLUGIN=true"
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    volumes:
+      - shuffle_opensearch_data:/usr/share/opensearch/data
+    networks:
+      soc_noc_net:
+        ipv4_address: 172.20.0.72
+
   shuffle-backend:
     image: ghcr.io/shuffle/shuffle-backend:latest
     container_name: soc_shuffle_backend
     restart: unless-stopped
+    depends_on:
+      - shuffle-opensearch
     environment:
       DATASTORE_EMULATOR_HOST: shuffle-database:8000
       SHUFFLE_APP_HOTLOAD_FOLDER: /shuffle-apps
       SHUFFLE_FILE_LOCATION: /shuffle-files
+      SHUFFLE_OPENSEARCH_URL: http://shuffle-opensearch:9200
+      SHUFFLE_OPENSEARCH_SKIP_SSL_VERIFY: "true"
       ORG_ID: Shuffle
       SHUFFLE_DEFAULT_USERNAME: admin
       SHUFFLE_DEFAULT_PASSWORD: ${SHUFFLE_PASSWORD:-SecureP@ss123}
@@ -357,7 +416,7 @@ services:
       - kafka
       - influxdb
     environment:
-      DATABASE_URL: postgresql+asyncpg://socnoc:${POSTGRES_PASSWORD:-SecureP@ss123}@postgres:5432/socnoc_db
+      DATABASE_URL: postgresql+asyncpg://socnoc:${POSTGRES_PASSWORD:-SecurePass123}@postgres:5432/socnoc_db
       INFLUXDB_URL: http://influxdb:8086
       INFLUXDB_TOKEN: ${INFLUXDB_TOKEN:-my-super-secret-token}
       INFLUXDB_ORG: socnoc
@@ -366,6 +425,10 @@ services:
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       SECRET_KEY: ${SECRET_KEY:-your-secret-key-here}
       ENVIRONMENT: development
+      FIRST_SUPERUSER_USERNAME: ${FIRST_SUPERUSER_USERNAME:-admin}
+      FIRST_SUPERUSER_EMAIL: ${FIRST_SUPERUSER_EMAIL:-admin@socnoc.local}
+      FIRST_SUPERUSER_PASSWORD: ${FIRST_SUPERUSER_PASSWORD:-ChangeMe123!}
+      FIRST_SUPERUSER_FULLNAME: ${FIRST_SUPERUSER_FULLNAME:-Administrateur SOC/NOC}
     ports:
       - "8000:8000"
     volumes:
@@ -386,7 +449,7 @@ services:
       - redis
       - kafka
     environment:
-      DATABASE_URL: postgresql+asyncpg://socnoc:${POSTGRES_PASSWORD:-SecureP@ss123}@postgres:5432/socnoc_db
+      DATABASE_URL: postgresql+asyncpg://socnoc:${POSTGRES_PASSWORD:-SecurePass123}@postgres:5432/socnoc_db
       INFLUXDB_URL: http://influxdb:8086
       INFLUXDB_TOKEN: ${INFLUXDB_TOKEN:-my-super-secret-token}
       REDIS_URL: redis://:${REDIS_PASSWORD:-SecureP@ss123}@redis:6379/0
