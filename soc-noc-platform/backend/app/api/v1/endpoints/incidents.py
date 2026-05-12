@@ -142,7 +142,7 @@ async def add_timeline_entry(
         message=payload.message,
         author_id=current_user.id,
         author_name=current_user.full_name or current_user.username,
-        metadata=payload.metadata or {},
+        extra_data=payload.extra_data or {},
     )
     db.add(entry)
     await db.flush()

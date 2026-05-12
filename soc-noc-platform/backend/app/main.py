@@ -21,6 +21,37 @@ _syslog_server: SyslogServer | None = None
 _netflow_collector: NetFlowCollector | None = None
 
 
+async def _seed_admin() -> None:
+    from sqlalchemy import select, func
+    from sqlalchemy.exc import IntegrityError
+    from app.core.database import AsyncSessionLocal as async_session_factory
+    from app.core.security import get_password_hash
+    from app.models.user import User, UserRole
+
+    async with async_session_factory() as session:
+        count = await session.scalar(select(func.count()).select_from(User))
+        if count:
+            return
+        admin = User(
+            username=settings.FIRST_SUPERUSER_USERNAME,
+            email=settings.FIRST_SUPERUSER_EMAIL,
+            full_name=settings.FIRST_SUPERUSER_FULLNAME,
+            hashed_password=get_password_hash(settings.FIRST_SUPERUSER_PASSWORD),
+            role=UserRole.SUPER_ADMIN,
+            is_active=True,
+            is_verified=True,
+        )
+        session.add(admin)
+        try:
+            await session.commit()
+            logger.info(
+                "Super-admin créé : username=%s", settings.FIRST_SUPERUSER_USERNAME
+            )
+        except IntegrityError:
+            await session.rollback()
+            logger.info("Super-admin already exists, skipping seed")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _syslog_server, _netflow_collector
@@ -30,22 +61,37 @@ async def lifespan(app: FastAPI):
         await conn.run_sync(Base.metadata.create_all)
     logger.info("Database tables created")
 
+    # Créer le super-admin initial si aucun utilisateur n'existe
+    await _seed_admin()
+    logger.info("Admin seeding done")
+
     # Démarrer le serveur Syslog
-    _syslog_server = SyslogServer(
-        udp_port=settings.SYSLOG_UDP_PORT,
-        tcp_port=settings.SYSLOG_TCP_PORT,
-    )
-    await _syslog_server.start()
-    logger.info("Syslog server started")
+    try:
+        _syslog_server = SyslogServer(
+            udp_port=settings.SYSLOG_UDP_PORT,
+            tcp_port=settings.SYSLOG_TCP_PORT,
+        )
+        await _syslog_server.start()
+        logger.info("Syslog server started")
+    except Exception as exc:
+        logger.warning("Syslog server could not start: %s", exc)
+        _syslog_server = None
 
     # Démarrer le collecteur NetFlow
-    _netflow_collector = NetFlowCollector(port=settings.NETFLOW_PORT)
-    await _netflow_collector.start()
-    logger.info("NetFlow collector started")
+    try:
+        _netflow_collector = NetFlowCollector(port=settings.NETFLOW_PORT)
+        await _netflow_collector.start()
+        logger.info("NetFlow collector started")
+    except Exception as exc:
+        logger.warning("NetFlow collector could not start: %s", exc)
+        _netflow_collector = None
 
     # Démarrer le broadcaster WebSocket (consomme Kafka → clients WS)
-    await start_kafka_broadcaster()
-    logger.info("WebSocket Kafka broadcaster started")
+    try:
+        await start_kafka_broadcaster()
+        logger.info("WebSocket Kafka broadcaster started")
+    except Exception as exc:
+        logger.warning("WebSocket Kafka broadcaster could not start: %s", exc)
 
     yield
 

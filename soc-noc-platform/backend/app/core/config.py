@@ -115,8 +115,19 @@ class Settings(BaseSettings):
     UPS_BATTERY_CRIT_THRESHOLD: float = 15.0
     INTERFACE_ERROR_THRESHOLD: float = 0.1  # percent
 
+    # Premier super-admin (créé au démarrage si aucun utilisateur n'existe)
+    FIRST_SUPERUSER_USERNAME: str = "admin"
+    FIRST_SUPERUSER_EMAIL: str = "admin@socnoc.local"
+    FIRST_SUPERUSER_PASSWORD: str = "ChangeMe123!"
+    FIRST_SUPERUSER_FULLNAME: str = "Administrateur SOC/NOC"
+
     # CORS
-    ALLOWED_ORIGINS: List[str] = ["http://localhost:3001", "http://localhost:3000"]
+    ALLOWED_ORIGINS: List[str] = [
+        "http://localhost",
+        "http://localhost:80",
+        "http://localhost:3000",
+        "http://localhost:3001",
+    ]
 
     class Config:
         env_file = ".env"
