@@ -77,6 +77,14 @@ export interface Alert {
   tags: string[];
 }
 
+export interface IncidentTimeline {
+  id: string;
+  event_type: string;
+  message: string;
+  author_name?: string;
+  created_at: string;
+}
+
 export interface Incident {
   id: string;
   ticket_number: string;
@@ -92,12 +100,15 @@ export interface Incident {
   team?: string;
   escalated: boolean;
   escalated_to?: string;
+  escalation_reason?: string;
   detected_at: string;
   started_at?: string;
   resolved_at?: string;
   mttr_minutes?: number;
   root_cause?: string;
   resolution_steps?: string;
+  lessons_learned?: string;
+  preventive_actions: string[];
   thehive_case_id?: string;
   tags: string[];
   created_at: string;

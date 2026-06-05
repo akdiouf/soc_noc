@@ -29,6 +29,15 @@ class UserResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class UserUpdate(BaseModel):
+    full_name: Optional[str] = None
+    role: Optional[UserRole] = None
+    phone: Optional[str] = None
+    is_active: Optional[bool] = None
+    on_call: Optional[bool] = None
+    password: Optional[str] = None
+
+
 class TokenResponse(BaseModel):
     access_token: str
     refresh_token: str

@@ -40,6 +40,21 @@ class IncidentUpdate(BaseModel):
     preventive_actions: Optional[list[str]] = None
 
 
+class TimelineEntryCreate(BaseModel):
+    event_type: str
+    message: str
+    extra_data: Optional[dict] = None
+
+
+class TimelineEntryResponse(BaseModel):
+    id: UUID
+    event_type: str
+    message: str
+    author_name: Optional[str] = None
+    created_at: datetime
+    model_config = {"from_attributes": True}
+
+
 class IncidentResponse(BaseModel):
     id: UUID
     ticket_number: str
@@ -55,12 +70,15 @@ class IncidentResponse(BaseModel):
     team: Optional[str] = None
     escalated: bool
     escalated_to: Optional[str] = None
+    escalation_reason: Optional[str] = None
     detected_at: datetime
     started_at: Optional[datetime] = None
     resolved_at: Optional[datetime] = None
     mttr_minutes: Optional[int] = None
     root_cause: Optional[str] = None
     resolution_steps: Optional[str] = None
+    lessons_learned: Optional[str] = None
+    preventive_actions: list[str]
     thehive_case_id: Optional[str] = None
     tags: list[str]
     created_at: datetime
@@ -73,9 +91,3 @@ class IncidentListResponse(BaseModel):
     total: int
     page: int
     size: int
-
-
-class TimelineEntryCreate(BaseModel):
-    event_type: str
-    message: str
-    extra_data: Optional[dict] = None

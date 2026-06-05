@@ -1,0 +1,32 @@
+---
+# Playbook maître — déploiement LOCAL complet SOC/NOC (HTTP, pas de certbot)
+#
+# Usages :
+#   Tout déployer :
+#     ansible-playbook -i inventory/hosts-local.yml playbooks/site-local.yml \
+#         -e noc_backend_ip=192.168.X.X
+#
+#   Plateforme uniquement :
+#     ansible-playbook -i inventory/hosts-local.yml playbooks/site-local.yml \
+#         --tags platform
+#
+#   Agents uniquement :
+#     ansible-playbook -i inventory/hosts-local.yml playbooks/site-local.yml \
+#         --tags agents -e noc_backend_ip=192.168.X.X
+#
+#   Ou directement via les playbooks dédiés :
+#     ansible-playbook -i inventory/hosts-local.yml playbooks/deploy-platform-local.yml
+#     ansible-playbook -i inventory/hosts-local.yml playbooks/deploy-agents-local.yml \
+#         -e noc_backend_ip=192.168.X.X
+#
+# noc_backend_ip : IP LAN de la machine faisant tourner Docker
+#   → Nécessaire uniquement pour le déploiement des agents (pas pour la plateforme)
+#   → Ne pas utiliser 127.0.0.1 (inaccessible depuis les machines distantes)
+
+- name: "ÉTAPE 1 — Plateforme NOC/SOC (local, HTTP)"
+  import_playbook: deploy-platform-local.yml
+  tags: platform
+
+- name: "ÉTAPE 2 — Agents de monitoring (LAN local)"
+  import_playbook: deploy-agents-local.yml
+  tags: agents

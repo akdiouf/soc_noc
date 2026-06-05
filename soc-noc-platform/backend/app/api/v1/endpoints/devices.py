@@ -130,6 +130,7 @@ async def toggle_maintenance(
     device = await _get_or_404(device_id, db)
     device.status = DeviceStatus.MAINTENANCE if enable else DeviceStatus.UNKNOWN
     await db.flush()
+    await db.refresh(device)
     return device
 
 

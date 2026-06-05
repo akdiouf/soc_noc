@@ -1,0 +1,368 @@
+---
+# Déploiement LOCAL des agents de monitoring (réseau LAN)
+#
+# Usage :
+#   # La plateforme tourne sur la même machine (localhost → IP LAN) :
+#   ansible-playbook -i inventory/hosts-local.yml playbooks/deploy-agents-local.yml \
+#       -e noc_backend_ip=192.168.100.X
+#
+#   # Ou si plateforme sur monlaptop (même machine que l'agent) :
+#   ansible-playbook -i inventory/hosts-local.yml playbooks/deploy-agents-local.yml \
+#       -e noc_backend_ip=192.168.100.151
+#
+# NOTES :
+#   - noc_backend_ip DOIT être l'IP LAN de la machine qui fait tourner Docker
+#     (pas 127.0.0.1, car les agents sont sur des machines distantes)
+#   - Port 5044 (Logstash Beats) doit être exposé dans docker/docker-compose.yml
+#     sous le service logstash : ports: ["5044:5044"]
+#   - Port 1514 (Wazuh registration) doit être exposé : ports: ["1515:1515"]
+
+- name: Déployer les agents de monitoring (réseau local)
+  hosts: linux_agents_local
+  become: true
+  gather_facts: true
+
+  vars:
+    prometheus_node_exporter_version: "1.7.0"
+    filebeat_version: "8.11.0"
+    wazuh_agent_version: "4.7.0"
+    # IP LAN de la machine qui héberge la plateforme Docker
+    # Surcharger avec : -e noc_backend_ip=192.168.X.X
+    noc_backend_ip: "{{ hostvars['localhost']['ansible_default_ipv4']['address'] | default('') }}"
+    noc_api_url: "http://{{ noc_backend_ip }}:8000"
+    noc_api_user: "admin"
+    noc_api_password: "ChangeMe123!"
+
+  pre_tasks:
+    - name: Vérifier que noc_backend_ip est défini et non vide
+      assert:
+        that:
+          - noc_backend_ip is defined
+          - noc_backend_ip | length > 0
+          - noc_backend_ip != "127.0.0.1"
+        fail_msg: >
+          noc_backend_ip doit être l'IP LAN de la machine hébergeant Docker.
+          Utilisez : -e noc_backend_ip=192.168.X.X
+          Ne pas utiliser 127.0.0.1 (inaccessible depuis une machine distante).
+
+    - name: Mettre à jour le cache apt
+      apt:
+        update_cache: true
+        cache_valid_time: 3600
+      when: ansible_os_family == "Debian"
+
+  tasks:
+    # ─── Node Exporter (métriques système → Prometheus) ───────────────────────
+    - name: Créer l'utilisateur node_exporter
+      user:
+        name: node_exporter
+        system: true
+        shell: /bin/false
+        create_home: false
+      tags: node_exporter
+
+    - name: Télécharger Node Exporter {{ prometheus_node_exporter_version }}
+      get_url:
+        url: "https://github.com/prometheus/node_exporter/releases/download/v{{ prometheus_node_exporter_version }}/node_exporter-{{ prometheus_node_exporter_version }}.linux-amd64.tar.gz"
+        dest: /tmp/node_exporter.tar.gz
+        mode: '0644'
+      tags: node_exporter
+
+    - name: Extraire Node Exporter
+      unarchive:
+        src: /tmp/node_exporter.tar.gz
+        dest: /usr/local/bin/
+        remote_src: true
+        extra_opts: ["--strip-components=1"]
+        include:
+          - "node_exporter-{{ prometheus_node_exporter_version }}.linux-amd64/node_exporter"
+      tags: node_exporter
+
+    - name: Créer le service systemd Node Exporter
+      copy:
+        dest: /etc/systemd/system/node_exporter.service
+        content: |
+          [Unit]
+          Description=Prometheus Node Exporter
+          After=network.target
+
+          [Service]
+          User=node_exporter
+          ExecStart=/usr/local/bin/node_exporter \
+            --collector.systemd \
+            --collector.processes \
+            --collector.tcpstat \
+            --web.listen-address=:9100
+          Restart=always
+          RestartSec=5
+
+          [Install]
+          WantedBy=multi-user.target
+      notify: restart node_exporter
+      tags: node_exporter
+
+    - name: Démarrer Node Exporter
+      systemd:
+        name: node_exporter
+        state: started
+        enabled: true
+        daemon_reload: true
+      tags: node_exporter
+
+    # ─── Filebeat (envoi des logs → Logstash) ─────────────────────────────────
+    # Pré-requis : port 5044 exposé dans docker-compose.yml (logstash service)
+    - name: Supprimer l'ancienne clé GPG Elastic si présente
+      file:
+        path: /usr/share/keyrings/elastic.gpg
+        state: absent
+      when: ansible_os_family == "Debian"
+      tags: filebeat
+
+    - name: Ajouter la clé GPG Elastic
+      shell: >
+        curl -fsSL https://artifacts.elastic.co/GPG-KEY-elasticsearch
+        | gpg --dearmor -o /usr/share/keyrings/elastic.gpg
+        && chmod 0644 /usr/share/keyrings/elastic.gpg
+      args:
+        creates: /usr/share/keyrings/elastic.gpg
+      when: ansible_os_family == "Debian"
+      tags: filebeat
+
+    - name: Ajouter le dépôt Elastic 8.x
+      apt_repository:
+        repo: "deb [signed-by=/usr/share/keyrings/elastic.gpg] https://artifacts.elastic.co/packages/8.x/apt stable main"
+        filename: elastic-8.x
+        state: present
+      when: ansible_os_family == "Debian"
+      tags: filebeat
+
+    - name: Installer Filebeat {{ filebeat_version }}
+      apt:
+        name: "filebeat={{ filebeat_version }}"
+        state: present
+      when: ansible_os_family == "Debian"
+      tags: filebeat
+
+    - name: Configurer Filebeat → Logstash local
+      copy:
+        dest: /etc/filebeat/filebeat.yml
+        content: |
+          filebeat.inputs:
+            - type: log
+              enabled: true
+              paths:
+                - /var/log/*.log
+                - /var/log/syslog
+                - /var/log/auth.log
+              fields:
+                host_type: linux_server
+                site: "{{ site | default('local') }}"
+
+            - type: log
+              enabled: true
+              paths:
+                - /var/log/nginx/*.log
+              fields:
+                service: nginx
+
+          output.logstash:
+            hosts: ["{{ noc_backend_ip }}:5044"]
+
+          logging.level: warning
+      notify: restart filebeat
+      tags: filebeat
+
+    - name: Démarrer Filebeat
+      systemd:
+        name: filebeat
+        state: started
+        enabled: true
+      tags: filebeat
+
+    # ─── Wazuh Agent (SIEM) ────────────────────────────────────────────────────
+    # Pré-requis : port 1514 (UDP) et 1515 (TCP) exposés dans docker-compose.yml
+    - name: Supprimer l'ancienne clé GPG Wazuh si présente
+      file:
+        path: /usr/share/keyrings/wazuh.gpg
+        state: absent
+      tags: wazuh
+
+    - name: Ajouter la clé GPG Wazuh
+      shell: >
+        curl -fsSL https://packages.wazuh.com/key/GPG-KEY-WAZUH
+        | gpg --dearmor -o /usr/share/keyrings/wazuh.gpg
+        && chmod 0644 /usr/share/keyrings/wazuh.gpg
+      args:
+        creates: /usr/share/keyrings/wazuh.gpg
+      tags: wazuh
+
+    - name: Ajouter le dépôt Wazuh 4.x
+      apt_repository:
+        repo: "deb [signed-by=/usr/share/keyrings/wazuh.gpg] https://packages.wazuh.com/4.x/apt/ stable main"
+        filename: wazuh
+        state: present
+      when: ansible_os_family == "Debian"
+      tags: wazuh
+
+    - name: Installer Wazuh Agent {{ wazuh_agent_version }}
+      apt:
+        name: "wazuh-agent={{ wazuh_agent_version }}-1"
+        state: present
+      when: ansible_os_family == "Debian"
+      tags: wazuh
+
+    - name: Configurer l'adresse du manager Wazuh
+      lineinfile:
+        path: /var/ossec/etc/ossec.conf
+        regexp: '<address>.*</address>'
+        line: "    <address>{{ noc_backend_ip }}</address>"
+      notify: restart wazuh-agent
+      tags: wazuh
+
+    - name: Enregistrer l'agent Wazuh (si pas déjà fait)
+      command: >
+        /var/ossec/bin/agent-auth
+        -m {{ noc_backend_ip }}
+        -A {{ inventory_hostname }}
+      args:
+        creates: /var/ossec/etc/client.keys
+      tags: wazuh
+
+    - name: Démarrer Wazuh Agent
+      systemd:
+        name: wazuh-agent
+        state: started
+        enabled: true
+      tags: wazuh
+
+    # ─── Enregistrement sur la plateforme NOC/SOC ─────────────────────────────
+    - name: Obtenir un token JWT de la plateforme
+      uri:
+        url: "{{ noc_api_url }}/api/v1/auth/login"
+        method: POST
+        body_format: form-urlencoded
+        body:
+          username: "{{ noc_api_user }}"
+          password: "{{ noc_api_password }}"
+        status_code: 200
+        timeout: 30
+      register: auth_response
+      delegate_to: localhost
+      become: false
+      no_log: true
+      tags: register
+
+    - name: Vérifier si l'agent est déjà enregistré
+      uri:
+        url: "{{ noc_api_url }}/api/v1/devices?search={{ ansible_host }}"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ auth_response.json.access_token }}"
+        status_code: 200
+      register: existing_devices
+      delegate_to: localhost
+      become: false
+      tags: register
+
+    - name: Enregistrer l'agent sur la plateforme (création)
+      uri:
+        url: "{{ noc_api_url }}/api/v1/devices"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ auth_response.json.access_token }}"
+        body_format: json
+        body:
+          name: "{{ inventory_hostname }}"
+          hostname: "{{ ansible_hostname }}"
+          ip_address: "{{ ansible_host }}"
+          device_type: "server"
+          site: "{{ site | default('local') }}"
+          monitoring_protocol: "snmp_v2c"
+          poll_interval: 60
+          is_monitored: true
+          is_critical: false
+          description: "Déployé automatiquement par Ansible (local)"
+          tags: ["ansible", "linux", "local", "{{ site | default('local') }}"]
+        status_code: 201
+      delegate_to: localhost
+      become: false
+      when: existing_devices.json['total'] == 0
+      tags: register
+
+    - name: Mémoriser l'ID de l'agent existant
+      set_fact:
+        existing_device_id: "{{ existing_devices.json['items'][0]['id'] }}"
+      when: existing_devices.json['total'] > 0
+      tags: register
+
+    - name: Mettre à jour l'agent sur la plateforme (si déjà existant)
+      uri:
+        url: "{{ noc_api_url }}/api/v1/devices/{{ existing_device_id }}"
+        method: PUT
+        headers:
+          Authorization: "Bearer {{ auth_response.json.access_token }}"
+        body_format: json
+        body:
+          hostname: "{{ ansible_hostname }}"
+          ip_address: "{{ ansible_host }}"
+          is_monitored: true
+          description: "Déployé automatiquement par Ansible (local)"
+        status_code: 200
+      delegate_to: localhost
+      become: false
+      when:
+        - existing_devices.json['total'] > 0
+        - existing_device_id is defined
+      tags: register
+
+  handlers:
+    - name: restart node_exporter
+      systemd:
+        name: node_exporter
+        state: restarted
+
+    - name: restart filebeat
+      systemd:
+        name: filebeat
+        state: restarted
+
+    - name: restart wazuh-agent
+      systemd:
+        name: wazuh-agent
+        state: restarted
+
+# ─── Équipements réseau locaux (SNMP / NetFlow / Syslog) ──────────────────────
+- name: Configurer SNMP sur les équipements réseau locaux
+  hosts: cisco_devices_local
+  gather_facts: false
+  connection: network_cli
+
+  vars:
+    noc_backend_ip: "{{ hostvars['localhost']['ansible_default_ipv4']['address'] | default('192.168.1.1') }}"
+
+  tasks:
+    - name: Activer SNMP v3 sur Cisco
+      ios_config:
+        lines:
+          - "snmp-server group NOC_GROUP v3 priv"
+          - "snmp-server user noc_monitor NOC_GROUP v3 auth sha {{ snmp_auth_password }} priv aes 128 {{ snmp_priv_password }}"
+          - "snmp-server host {{ noc_backend_ip }} version 3 priv noc_monitor"
+          - "snmp-server enable traps"
+        save_when: modified
+
+    - name: Activer NetFlow v5
+      ios_config:
+        lines:
+          - "ip flow-export version 5"
+          - "ip flow-export destination {{ noc_backend_ip }} 2055"
+          - "ip flow-cache timeout active 1"
+          - "ip flow-cache timeout inactive 15"
+        save_when: modified
+
+    - name: Activer Syslog
+      ios_config:
+        lines:
+          - "logging host {{ noc_backend_ip }} transport udp port 514"
+          - "logging trap informational"
+          - "service timestamps log datetime msec"
+        save_when: modified

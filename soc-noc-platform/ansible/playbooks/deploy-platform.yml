@@ -1,0 +1,469 @@
+---
+# Playbook de déploiement de la plateforme NOC/SOC
+# Usage: ansible-playbook -i inventory/hosts.yml playbooks/deploy-platform.yml
+
+- name: Déployer la plateforme NOC/SOC
+  hosts: noc_platform
+  become: true
+  gather_facts: true
+
+  vars:
+    platform_dir: /opt/soc-noc-platform
+    compose_dir: "{{ platform_dir }}/docker"
+    docker_compose_version: "2.24.0"
+    domain: akisoc.team.akilee.tech
+    certbot_email: daksenegal@gmail.com
+
+  pre_tasks:
+    - import_tasks: tasks/apt-pre.yml
+
+  tasks:
+    # ─── Docker ───────────────────────────────────────────────────────────────
+    - name: Installer les dépendances Docker
+      apt:
+        name:
+          - ca-certificates
+          - curl
+          - gnupg
+          - lsb-release
+        state: present
+      when: ansible_os_family == "Debian"
+
+    - name: Supprimer l'ancienne clé GPG Docker (nettoyage)
+      file:
+        path: /usr/share/keyrings/docker.gpg
+        state: absent
+      when: ansible_os_family == "Debian"
+
+    - name: Télécharger et déarmoriser la clé GPG Docker
+      shell: >
+        curl -fsSL https://download.docker.com/linux/ubuntu/gpg
+        | gpg --dearmor -o /usr/share/keyrings/docker.gpg
+        && chmod 0644 /usr/share/keyrings/docker.gpg
+      when: ansible_os_family == "Debian"
+
+    - name: Ajouter le dépôt Docker
+      apt_repository:
+        repo: "deb [arch=amd64 signed-by=/usr/share/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
+        filename: docker
+        state: present
+      when: ansible_os_family == "Debian"
+
+    - name: Installer Docker Engine
+      apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-buildx-plugin
+          - docker-compose-plugin
+        state: present
+      when: ansible_os_family == "Debian"
+
+    - name: Démarrer et activer Docker
+      systemd:
+        name: docker
+        state: started
+        enabled: true
+
+    # ─── Répertoire de la plateforme ──────────────────────────────────────────
+    - name: Créer le répertoire de la plateforme
+      file:
+        path: "{{ platform_dir }}"
+        state: directory
+        mode: '0750'
+        owner: root
+        group: docker
+
+    - name: Copier les fichiers de la plateforme
+      synchronize:
+        src: "{{ playbook_dir }}/../../"
+        dest: "{{ platform_dir }}/"
+        delete: false
+        recursive: true
+        rsync_opts:
+          - "--exclude=.git"
+          - "--exclude=__pycache__"
+          - "--exclude=*.pyc"
+          - "--exclude=node_modules"
+          - "--exclude=.env.example"
+
+    - name: Vérifier la présence du fichier .env dans docker/
+      stat:
+        path: "{{ compose_dir }}/.env"
+      register: env_file
+
+    - name: Copier .env depuis la racine vers docker/ si absent
+      copy:
+        src: "{{ platform_dir }}/.env"
+        dest: "{{ compose_dir }}/.env"
+        remote_src: true
+      when: not env_file.stat.exists
+
+    # ─── Répertoires de données avec permissions correctes ────────────────────
+    - name: Créer les répertoires de données TheHive (uid 1000 = thehive)
+      file:
+        path: "{{ compose_dir }}/thehive/data/{{ item }}"
+        state: directory
+        mode: '0777'
+        owner: root
+        group: root
+      loop:
+        - db
+        - index
+        - files
+
+    # ─── Déploiement Docker Compose ───────────────────────────────────────────
+    - name: Arrêter les anciens conteneurs
+      community.docker.docker_compose_v2:
+        project_src: "{{ compose_dir }}"
+        state: absent
+      ignore_errors: true
+
+    - name: Construire et démarrer la plateforme
+      community.docker.docker_compose_v2:
+        project_src: "{{ compose_dir }}"
+        state: present
+        pull: always
+        build: always
+
+    - name: Vérifier que les conteneurs tournent
+      community.docker.docker_container_info:
+        name: "{{ item }}"
+      register: container_info
+      loop:
+        - soc_backend
+        - soc_prometheus
+        - soc_grafana
+      failed_when: not container_info.container.State.Running
+
+    # ─── Nginx hôte + Let's Encrypt ──────────────────────────────────────────
+    - name: Vérifier si nginx est installé
+      stat:
+        path: /usr/sbin/nginx
+      register: nginx_binary
+
+    - name: Installer nginx si absent
+      apt:
+        name: nginx
+        state: present
+        update_cache: true
+      when:
+        - not nginx_binary.stat.exists
+        - ansible_os_family == "Debian"
+
+    - name: Installer certbot (mode webroot)
+      apt:
+        name:
+          - certbot
+        state: present
+      when: ansible_os_family == "Debian"
+
+    - name: Créer le répertoire webroot pour certbot
+      file:
+        path: /var/www/certbot
+        state: directory
+        mode: '0755'
+
+    - name: Démarrer et activer nginx
+      systemd:
+        name: nginx
+        state: started
+        enabled: true
+
+    - name: Désactiver le site par défaut nginx
+      file:
+        path: /etc/nginx/sites-enabled/default
+        state: absent
+      notify: reload nginx
+
+    # ── Étape 1 : vhost HTTP minimal (pour le challenge ACME) ────────────────
+    - name: Vhost nginx HTTP (pre-TLS, challenge ACME)
+      copy:
+        dest: /etc/nginx/sites-available/{{ domain }}
+        mode: '0644'
+        content: |
+          server {
+              listen 80;
+              server_name {{ domain }};
+
+              location /.well-known/acme-challenge/ {
+                  root /var/www/certbot;
+              }
+
+              location / {
+                  proxy_pass         http://127.0.0.1:3001;
+                  proxy_http_version 1.1;
+                  proxy_set_header   Host       $host;
+                  proxy_set_header   X-Real-IP  $remote_addr;
+                  proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+              }
+          }
+      notify: reload nginx
+
+    - name: Activer le site virtuel {{ domain }}
+      file:
+        src: /etc/nginx/sites-available/{{ domain }}
+        dest: /etc/nginx/sites-enabled/{{ domain }}
+        state: link
+      notify: reload nginx
+
+    - name: Tester la configuration nginx (HTTP)
+      command: nginx -t
+      changed_when: false
+
+    - name: Recharger nginx avant certbot
+      meta: flush_handlers
+
+    # ── Étape 2 : obtention du certificat ────────────────────────────────────
+    - name: Vérifier si le certificat Let's Encrypt existe déjà
+      stat:
+        path: /etc/letsencrypt/live/{{ domain }}/fullchain.pem
+      register: letsencrypt_cert
+
+    - name: Obtenir le certificat Let's Encrypt (webroot)
+      command: >
+        certbot certonly --webroot
+        -w /var/www/certbot
+        --non-interactive
+        --agree-tos
+        --email {{ certbot_email }}
+        -d {{ domain }}
+      when: not letsencrypt_cert.stat.exists
+
+    - name: Mettre à jour le stat du certificat après obtention
+      stat:
+        path: /etc/letsencrypt/live/{{ domain }}/fullchain.pem
+      register: letsencrypt_cert
+
+    # ── Étape 3 : vhost complet HTTPS (si certificat présent) ────────────────
+    - name: Vhost nginx HTTPS complet avec toutes les routes
+      copy:
+        dest: /etc/nginx/sites-available/{{ domain }}
+        mode: '0644'
+        content: |
+          # ── HTTP → HTTPS redirect ──────────────────────────────────────────
+          server {
+              listen 80;
+              server_name {{ domain }};
+
+              location /.well-known/acme-challenge/ {
+                  root /var/www/certbot;
+              }
+
+              location / {
+                  return 301 https://$host$request_uri;
+              }
+          }
+
+          # ── HTTPS ──────────────────────────────────────────────────────────
+          server {
+              listen 443 ssl http2;
+              server_name {{ domain }};
+
+              ssl_certificate     /etc/letsencrypt/live/{{ domain }}/fullchain.pem;
+              ssl_certificate_key /etc/letsencrypt/live/{{ domain }}/privkey.pem;
+              ssl_protocols       TLSv1.2 TLSv1.3;
+              ssl_ciphers         HIGH:!aNULL:!MD5;
+              ssl_session_cache   shared:SSL:10m;
+              ssl_session_timeout 10m;
+
+              add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+              add_header X-Frame-Options SAMEORIGIN;
+              add_header X-Content-Type-Options nosniff;
+
+              client_max_body_size 50m;
+
+              # ── Frontend React ─────────────────────────────────────────────
+              location / {
+                  proxy_pass         http://127.0.0.1:3001;
+                  proxy_http_version 1.1;
+                  proxy_set_header   Upgrade    $http_upgrade;
+                  proxy_set_header   Connection "upgrade";
+                  proxy_set_header   Host       $host;
+                  proxy_set_header   X-Real-IP  $remote_addr;
+                  proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+                  proxy_set_header   X-Forwarded-Proto $scheme;
+              }
+
+              # ── Backend WebSocket (doit être avant /api/ pour la priorité) ──
+              location /api/v1/ws/ {
+                  proxy_pass         http://127.0.0.1:8000/api/v1/ws/;
+                  proxy_http_version 1.1;
+                  proxy_set_header   Upgrade    $http_upgrade;
+                  proxy_set_header   Connection "upgrade";
+                  proxy_set_header   Host       $host;
+                  proxy_set_header   X-Real-IP  $remote_addr;
+                  proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+                  proxy_set_header   X-Forwarded-Proto $scheme;
+                  proxy_read_timeout 3600s;
+                  proxy_send_timeout 3600s;
+              }
+
+              # ── Backend API REST ───────────────────────────────────────────
+              location /api/ {
+                  proxy_pass         http://127.0.0.1:8000/api/;
+                  proxy_set_header   Host       $host;
+                  proxy_set_header   X-Real-IP  $remote_addr;
+                  proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+                  proxy_set_header   X-Forwarded-Proto $scheme;
+                  proxy_read_timeout 60s;
+                  proxy_buffering    off;
+              }
+
+              location /ws/ {
+                  proxy_pass         http://127.0.0.1:8000/ws/;
+                  proxy_http_version 1.1;
+                  proxy_set_header   Upgrade    $http_upgrade;
+                  proxy_set_header   Connection "upgrade";
+                  proxy_set_header   Host       $host;
+                  proxy_set_header   X-Real-IP  $remote_addr;
+                  proxy_read_timeout 3600s;
+              }
+
+              location /docs { proxy_pass http://127.0.0.1:8000/docs; proxy_set_header Host $host; }
+              location /openapi.json { proxy_pass http://127.0.0.1:8000/openapi.json; proxy_set_header Host $host; }
+
+              # ── Grafana ────────────────────────────────────────────────────
+              location /grafana/ {
+                  proxy_pass         http://127.0.0.1:3000/grafana/;
+                  proxy_set_header   Host       $host;
+                  proxy_set_header   X-Real-IP  $remote_addr;
+                  proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+                  proxy_set_header   X-Forwarded-Proto $scheme;
+              }
+
+              # ── Kibana ─────────────────────────────────────────────────────
+              location /kibana/ {
+                  proxy_pass         http://127.0.0.1:5601/kibana/;
+                  proxy_set_header   Host       $host;
+                  proxy_set_header   X-Real-IP  $remote_addr;
+                  proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+                  proxy_set_header   X-Forwarded-Proto $scheme;
+                  proxy_set_header   X-Forwarded-Host  $host;
+              }
+
+              # ── Wazuh Dashboard ────────────────────────────────────────────
+              location /wazuh/ {
+                  proxy_pass         http://127.0.0.1:5602/wazuh/;
+                  proxy_set_header   Host       $host;
+                  proxy_set_header   X-Real-IP  $remote_addr;
+                  proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+                  proxy_set_header   X-Forwarded-Proto $scheme;
+                  proxy_set_header   X-Forwarded-Host  $host;
+                  proxy_read_timeout 300s;
+              }
+
+              # ── Prometheus ─────────────────────────────────────────────────
+              location /prometheus/ {
+                  proxy_pass         http://127.0.0.1:9090/prometheus/;
+                  proxy_set_header   Host       $host;
+                  proxy_set_header   X-Real-IP  $remote_addr;
+              }
+
+              # ── Alertmanager ───────────────────────────────────────────────
+              location /alerts/ {
+                  proxy_pass         http://127.0.0.1:9093/alerts/;
+                  proxy_set_header   Host       $host;
+                  proxy_set_header   X-Real-IP  $remote_addr;
+              }
+
+              # ── NetBox ─────────────────────────────────────────────────────
+              location /netbox/ {
+                  proxy_pass         http://127.0.0.1:8080/netbox/;
+                  proxy_set_header   Host       $host;
+                  proxy_set_header   X-Real-IP  $remote_addr;
+                  proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+                  proxy_set_header   X-Forwarded-Proto $scheme;
+              }
+
+              # ── TheHive ────────────────────────────────────────────────────
+              location /thehive/ {
+                  proxy_pass         http://127.0.0.1:9000/thehive/;
+                  proxy_set_header   Host       $host;
+                  proxy_set_header   X-Real-IP  $remote_addr;
+                  proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+                  proxy_set_header   X-Forwarded-Proto $scheme;
+              }
+
+              # TheHive SPA : paths d'assets hardcodés sans préfixe dans index.html
+              location /static/ {
+                  proxy_pass         http://127.0.0.1:9000/static/;
+                  proxy_set_header   Host       $host;
+                  proxy_set_header   X-Forwarded-Proto $scheme;
+              }
+
+              location = /manifest.json {
+                  proxy_pass         http://127.0.0.1:9000/manifest.json;
+                  proxy_set_header   Host       $host;
+                  proxy_set_header   X-Forwarded-Proto $scheme;
+              }
+
+              # ── Cortex ─────────────────────────────────────────────────────
+              location /cortex/ {
+                  proxy_pass         http://127.0.0.1:9001/cortex/;
+                  proxy_set_header   Host       $host;
+                  proxy_set_header   X-Real-IP  $remote_addr;
+                  proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+                  proxy_set_header   X-Forwarded-Proto $scheme;
+              }
+
+              # ── Shuffle SOAR (frontend UI) ─────────────────────────────────
+              # Note: Shuffle backend API reste accessible sur le port 5001 directement
+              location /shuffle/ {
+                  proxy_pass         http://127.0.0.1:3002/;
+                  proxy_set_header   Host       $host;
+                  proxy_set_header   X-Real-IP  $remote_addr;
+                  proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+                  proxy_set_header   X-Forwarded-Proto $scheme;
+              }
+
+              # ── Shuffle Backend API ────────────────────────────────────────
+              location /shuffle-api/ {
+                  proxy_pass         http://127.0.0.1:5001/;
+                  proxy_set_header   Host       $host;
+                  proxy_set_header   X-Real-IP  $remote_addr;
+                  proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+                  proxy_set_header   X-Forwarded-Proto $scheme;
+              }
+          }
+      when: letsencrypt_cert.stat.exists
+      notify: reload nginx
+
+    - name: Tester la configuration nginx finale
+      command: nginx -t
+      changed_when: false
+
+    - name: Planifier le renouvellement automatique du certificat
+      cron:
+        name: "certbot renew {{ domain }}"
+        job: "certbot renew --webroot -w /var/www/certbot --quiet --post-hook 'systemctl reload nginx'"
+        hour: "3"
+        minute: "30"
+        weekday: "1"
+        user: root
+
+    # ─── Firewall ─────────────────────────────────────────────────────────────
+    - name: Autoriser les ports de la plateforme (ufw)
+      community.general.ufw:
+        rule: allow
+        port: "{{ item.port }}"
+        proto: "{{ item.proto }}"
+        comment: "{{ item.comment }}"
+      loop:
+        - { port: '80',   proto: tcp, comment: 'HTTP' }
+        - { port: '443',  proto: tcp, comment: 'HTTPS' }
+        - { port: '8000', proto: tcp, comment: 'Backend API' }
+        - { port: '9090', proto: tcp, comment: 'Prometheus' }
+        - { port: '3000', proto: tcp, comment: 'Grafana' }
+        - { port: '5044', proto: tcp, comment: 'Logstash Beats' }
+        - { port: '514',  proto: udp, comment: 'Syslog' }
+        - { port: '2055', proto: udp, comment: 'NetFlow' }
+        - { port: '161',  proto: udp, comment: 'SNMP' }
+      when: ansible_os_family == "Debian"
+
+  handlers:
+    - name: reload nginx
+      systemd:
+        name: nginx
+        state: reloaded

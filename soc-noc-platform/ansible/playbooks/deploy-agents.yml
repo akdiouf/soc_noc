@@ -1,24 +1,45 @@
 ---
 # Playbook de déploiement des agents de monitoring sur les serveurs
-# Usage: ansible-playbook -i inventory/hosts.yml playbooks/deploy-agents.yml
+# Usage: ansible-playbook -i inventory/hosts.yml playbooks/deploy-agents.yml -e noc_backend_ip=<IP>
+#
+# Variables requises :
+#   noc_backend_ip  IP ou FQDN de la plateforme NOC/SOC (obligatoire)
+#                   Exemple: -e noc_backend_ip=213.199.42.187
 
 - name: Déployer les agents de monitoring sur les serveurs Linux
   hosts: linux_servers
-  become: yes
-  gather_facts: yes
+  become: true
+  gather_facts: true
 
   vars:
     prometheus_node_exporter_version: "1.7.0"
     filebeat_version: "8.11.0"
     wazuh_agent_version: "4.7.0"
-    noc_backend_ip: "{{ groups['noc_platform'][0] }}"
+    noc_backend_ip: >-
+      {{ hostvars[groups['noc_platform'][0]]['ansible_host']
+         if 'noc_platform' in groups and groups['noc_platform'] | length > 0
+         else '' }}
+    noc_api_url: "http://{{ noc_backend_ip }}:8000"
+    noc_api_user: "admin"
+    noc_api_password: "ChangeMe123!"
+
+  pre_tasks:
+    - name: Vérifier que noc_backend_ip est défini
+      assert:
+        that: noc_backend_ip | length > 0
+        fail_msg: >
+          La variable noc_backend_ip est obligatoire.
+          Passez-la avec : -e noc_backend_ip=<IP_PLATEFORME>
+          ou assurez-vous que le groupe noc_platform est présent dans l'inventaire.
+
+    - import_tasks: tasks/apt-pre.yml
 
   tasks:
     # ─── Node Exporter (métriques système) ────────────────────────────────────
     - name: Créer l'utilisateur node_exporter
       user:
         name: node_exporter
-        system: yes
+        system: true
         shell: /bin/false
         create_home: no
 
@@ -32,7 +53,7 @@
       unarchive:
         src: /tmp/node_exporter.tar.gz
         dest: /usr/local/bin/
-        remote_src: yes
+        remote_src: true
         extra_opts: ["--strip-components=1"]
         include:
           - "node_exporter-{{ prometheus_node_exporter_version }}.linux-amd64/node_exporter"
@@ -62,13 +83,33 @@
       systemd:
         name: node_exporter
         state: started
-        enabled: yes
-        daemon_reload: yes
+        enabled: true
+        daemon_reload: true
 
     # ─── Filebeat (envoi des logs) ─────────────────────────────────────────────
+    - name: Supprimer l'ancienne clé GPG Elastic si présente
+      file:
+        path: /usr/share/keyrings/elastic.gpg
+        state: absent
+      when: ansible_os_family == "Debian"
+
+    - name: Ajouter la clé GPG Elastic (déarmorisée)
+      shell: >
+        curl -fsSL https://artifacts.elastic.co/GPG-KEY-elasticsearch
+        | gpg --dearmor -o /usr/share/keyrings/elastic.gpg
+        && chmod 0644 /usr/share/keyrings/elastic.gpg
+      when: ansible_os_family == "Debian"
+
+    - name: Ajouter le dépôt Elastic 8.x
+      apt_repository:
+        repo: "deb [signed-by=/usr/share/keyrings/elastic.gpg] https://artifacts.elastic.co/packages/8.x/apt stable main"
+        filename: elastic-8.x
+        state: present
+      when: ansible_os_family == "Debian"
+
     - name: Installer Filebeat
-      package:
-        name: filebeat
+      apt:
+        name: "filebeat={{ filebeat_version }}"
         state: present
       when: ansible_os_family == "Debian"
 
@@ -104,19 +145,32 @@
       systemd:
         name: filebeat
         state: started
-        enabled: yes
+        enabled: true
 
     # ─── Wazuh Agent (SIEM) ────────────────────────────────────────────────────
-    - name: Ajouter le repo Wazuh
-      get_url:
-        url: https://packages.wazuh.com/key/GPG-KEY-WAZUH
-        dest: /usr/share/keyrings/wazuh.gpg
-        mode: '0644'
+    - name: Supprimer l'ancienne clé GPG Wazuh si présente
+      file:
+        path: /usr/share/keyrings/wazuh.gpg
+        state: absent
+
+    - name: Ajouter la clé GPG Wazuh (déarmorisée)
+      shell: >
+        curl -fsSL https://packages.wazuh.com/key/GPG-KEY-WAZUH
+        | gpg --dearmor -o /usr/share/keyrings/wazuh.gpg
+        && chmod 0644 /usr/share/keyrings/wazuh.gpg
+
+    - name: Ajouter le dépôt Wazuh 4.x
+      apt_repository:
+        repo: "deb [signed-by=/usr/share/keyrings/wazuh.gpg] https://packages.wazuh.com/4.x/apt/ stable main"
+        filename: wazuh
+        state: present
+      when: ansible_os_family == "Debian"
 
     - name: Installer Wazuh Agent
-      package:
-        name: wazuh-agent
+      apt:
+        name: "wazuh-agent={{ wazuh_agent_version }}-1"
         state: present
+      when: ansible_os_family == "Debian"
 
     - name: Configurer le Wazuh Agent
       lineinfile:
@@ -136,7 +190,81 @@
       systemd:
         name: wazuh-agent
         state: started
-        enabled: yes
+        enabled: true
+
+    # ─── Enregistrement sur la plateforme NOC/SOC ─────────────────────────────
+    - name: Obtenir un token JWT de la plateforme
+      uri:
+        url: "{{ noc_api_url }}/api/v1/auth/login"
+        method: POST
+        body_format: form-urlencoded
+        body:
+          username: "{{ noc_api_user }}"
+          password: "{{ noc_api_password }}"
+        status_code: 200
+      register: auth_response
+      delegate_to: localhost
+      become: false
+      no_log: true
+
+    - name: Vérifier si l'agent est déjà enregistré
+      uri:
+        url: "{{ noc_api_url }}/api/v1/devices?search={{ ansible_host }}"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ auth_response.json.access_token }}"
+        status_code: 200
+      register: existing_devices
+      delegate_to: localhost
+      become: false
+
+    - name: Enregistrer l'agent sur la plateforme (création)
+      uri:
+        url: "{{ noc_api_url }}/api/v1/devices"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ auth_response.json.access_token }}"
+        body_format: json
+        body:
+          name: "{{ inventory_hostname }}"
+          hostname: "{{ ansible_hostname }}"
+          ip_address: "{{ ansible_host }}"
+          device_type: "server"
+          site: "{{ site | default('primary') }}"
+          monitoring_protocol: "snmp_v2c"
+          poll_interval: 60
+          is_monitored: true
+          is_critical: false
+          description: "Déployé automatiquement par Ansible"
+          tags: ["ansible", "linux", "{{ site | default('primary') }}"]
+        status_code: 201
+      delegate_to: localhost
+      become: false
+      when: existing_devices.json['total'] == 0
+
+    - name: Mémoriser l'ID de l'agent existant
+      set_fact:
+        existing_device_id: "{{ existing_devices.json['items'][0]['id'] }}"
+      when: existing_devices.json['total'] > 0
+
+    - name: Mettre à jour l'agent sur la plateforme (si déjà existant)
+      uri:
+        url: "{{ noc_api_url }}/api/v1/devices/{{ existing_device_id }}"
+        method: PUT
+        headers:
+          Authorization: "Bearer {{ auth_response.json.access_token }}"
+        body_format: json
+        body:
+          hostname: "{{ ansible_hostname }}"
+          ip_address: "{{ ansible_host }}"
+          is_monitored: true
+          description: "Déployé automatiquement par Ansible"
+        status_code: 200
+      delegate_to: localhost
+      become: false
+      when:
+        - existing_devices.json['total'] > 0
+        - existing_device_id is defined
 
   handlers:
     - name: restart filebeat

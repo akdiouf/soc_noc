@@ -1,0 +1,43 @@
+---
+# Inventaire LOCAL — tests sur poste / réseau LAN
+# Usage : ansible-playbook -K -i inventory/hosts-local.yml playbooks/site-local -e "ansible_port=1243"
+#
+# Plateforme  → localhost  (Docker tourne en local, connection directe)
+# Agents      → monlaptop  (Linux LAN 192.168.100.151)
+
+all:
+  children:
+    # ─── Plateforme NOC/SOC (locale) ────────────────────────────────────────────
+    noc_platform_local:
+      hosts:
+        localhost:
+          ansible_connection: local
+          ansible_python_interpreter: /usr/bin/python3
+
+    # ─── Machines cibles des agents ─────────────────────────────────────────────
+    linux_agents_local:
+      children:
+        local_machines:
+          hosts:
+            monlaptop:
+              ansible_host: 192.168.100.151
+              ansible_user: abdoukarimdiouf
+              ansible_port: 1243
+              ansible_ssh_private_key_file: ~/.ssh/id_rsa
+              site: laptopbureau
+
+    # ─── Équipements réseau (décommenter au besoin) ──────────────────────────────
+    cisco_devices_local:
+      hosts:
+        # core-router-01:
+        #   ansible_host: 192.168.1.1
+        #   ansible_network_os: ios
+        # dist-switch-01:
+        #   ansible_host: 192.168.1.10
+        #   ansible_network_os: ios
+
+  vars:
+    ansible_user: abdoukarimdiouf
+    ansible_ssh_private_key_file: ~/.ssh/id_rsa
+    snmp_auth_password: "{{ vault_snmp_auth_password }}"
+    snmp_priv_password: "{{ vault_snmp_priv_password }}"

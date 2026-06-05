@@ -1,0 +1,163 @@
+9r"85qL54~?B
+9r"85qL54?~B
+
+ Résumé des URLs disponibles :
+
+  ┌─────────────────────────────────────────────┬────────────────┐
+  │                     URL                     │    Service     │
+  ├─────────────────────────────────────────────┼────────────────┤
+  │ https://akisoc.team.akilee.tech/            │ Frontend React │
+  ├─────────────────────────────────────────────┼────────────────┤
+  │ https://akisoc.team.akilee.tech/api/        │ Backend API    │
+  ├─────────────────────────────────────────────┼────────────────┤
+  │ https://akisoc.team.akilee.tech/docs        │ Swagger UI     │
+  ├─────────────────────────────────────────────┼────────────────┤
+  │ https://akisoc.team.akilee.tech/grafana/    │ Grafana        │
+  ├─────────────────────────────────────────────┼────────────────┤
+  │ https://akisoc.team.akilee.tech/kibana/     │ Kibana         │
+  ├─────────────────────────────────────────────┼────────────────┤
+  │ https://akisoc.team.akilee.tech/prometheus/ │ Prometheus     │
+  ├─────────────────────────────────────────────┼────────────────┤
+  │ https://akisoc.team.akilee.tech/alerts/     │ Alertmanager   │
+  ├─────────────────────────────────────────────┼────────────────┤
+  │ https://akisoc.team.akilee.tech/netbox/     │ NetBox CMDB    │
+  ├─────────────────────────────────────────────┼────────────────┤
+  │ https://akisoc.team.akilee.tech/thehive/    │ TheHive        │
+  ├─────────────────────────────────────────────┼────────────────┤
+  │ https://akisoc.team.akilee.tech/cortex/     │ Cortex         │
+  ├─────────────────────────────────────────────┼────────────────┤
+  │ https://akisoc.team.akilee.tech/shuffle/    │ Shuffle SOAR   │
+  └─────────────────────────────────────────────┴───────────────
+  
+  
+  ✅ Plateforme démarrée !
+
+Accès :
+  Portail NOC/SOC  : http://localhost:8090
+  API Docs         : http://localhost:8000/docs
+) Grafana          : http://localhost:3000   (admin/jGXD108nx2kW39rZgoh0v
+  Kibana           : http://localhost:5601
+  NetBox (CMDB)    : http://localhost:8080
+  TheHive          : http://localhost:9000
+  Shuffle (SOAR)   : http://localhost:5001
+  
+  
+    serve_from_sub_path/rewriteBasePath/route-prefix
+  options:
+    - /grafana/ → Grafana:3000
+    - /kibana → Kibana:5601
+    - /prometheus/ → Prometheus:9090
+    - /alerts/ → Alertmanager:9093
+    - /thehive → TheHive:9000
+    - /cortex → Cortex:9001
+    - /wazuh → Wazuh Dashboard:5601
+    - /netbox → NetBox:8080
+    - /shuffle/ → Shuffle Frontend (rewrite strips prefix
+	
+	
+To start the stack locally:
+  cd soc-noc-platform/docker
+  docker compose up -d
+
+  All UIs will then be at http://localhost:8090/:
+
+  ┌──────────────┬───────────────────────────────────┐
+  │   Service    │                URL                │
+  ├──────────────┼───────────────────────────────────┤
+  │ Frontend     │ http://localhost:8090/            │
+  ├──────────────┼───────────────────────────────────┤
+  │ API          │ http://localhost:8090/api/        │
+  ├──────────────┼───────────────────────────────────┤
+  │ Grafana      │ http://localhost:8090/grafana/    │
+  ├──────────────┼───────────────────────────────────┤
+  │ Kibana       │ http://localhost:8090/kibana      │
+  ├──────────────┼───────────────────────────────────┤
+  │ Prometheus   │ http://localhost:8090/prometheus/ │
+  ├──────────────┼───────────────────────────────────┤
+  │ Alertmanager │ http://localhost:8090/alerts/     │
+  ├──────────────┼───────────────────────────────────┤
+  │ TheHive      │ http://localhost:8090/thehive     │
+  ├──────────────┼───────────────────────────────────┤
+  │ Cortex       │ http://localhost:8090/cortex      │
+  ├──────────────┼───────────────────────────────────┤
+  │ Wazuh        │ http://localhost:8090/wazuh       │
+  ├──────────────┼───────────────────────────────────┤
+  │ NetBox       │ http://localhost:8090/netbox      │
+  └──────────────┴───────────────────────────────────┘
+
+  When you're ready to deploy with Ansible, revert these
+  four URLs back to https://akisoc.team.akilee.tech/...
+  and swap in the HTTPS nginx block.
+
+
+---
+  Utilisation
+
+  Déployer toute la plateforme en local :
+  ansible-playbook -i inventory/hosts-local.yml
+  playbooks/deploy-platform-local.yml
+
+  Déployer les agents sur monlaptop :
+  ansible-playbook -i inventory/hosts-local.yml
+  playbooks/deploy-agents-local.yml \
+      -e noc_backend_ip=192.168.100.X   # IP LAN de ta
+  machine Docker
+
+  Tout à la fois :
+  ansible-playbook -i inventory/hosts-local.yml
+  playbooks/site-local.yml \
+      -e noc_backend_ip=192.168.100.X
+
+  Tags disponibles pour cibler des parties spécifiques :
+  docker, sync, compose, sysctl, node_exporter, filebeat,
+  wazuh, register
+
+  ---
+  Deux points à vérifier dans docker-compose.yml
+
+  Pour que les agents LAN puissent envoyer des données,
+  deux ports doivent être exposés sur le service logstash
+  et wazuh-manager :
+
+  # logstash :
+  ports:
+    - "5044:5044"   # Filebeat beats input
+
+  # wazuh-manager :
+  ports:
+    - "1514:1514/udp"   # agents Wazuh
+    - "1515:1515"        # enregistrement agents Wazuh
+
+✻ Worked for 5m 35s
+
+
+ docker compose down
+  docker volume rm docker_postgres_data
+  docker compose up -d postgres
+
+  Si le volume s'appelle autrement, vérifie avec :
+  docker volume ls | findstr postgres
+
+  Puis relance tout une fois postgres healthy :
+  docker compose up -d
+  
+  
+  
+  http://localhost:8090/           → Frontend React
+  http://localhost:8090/api/docs   → API Swagger
+  http://localhost:8090/grafana/   → Grafana  (admin /
+  .env GRAFANA_PASSWORD)
+  http://localhost:8090/kibana     → Kibana
+  http://localhost:8090/prometheus/→ Prometheus
+  http://localhost:8090/alerts/    → Alertmanager
+  http://localhost:8090/thehive    → TheHive 5
+  http://localhost:8090/cortex     → Cortex 3
+  http://localhost:8090/netbox     → NetBox
+  http://localhost:8090/wazuh      → Wazuh Dashboard
+  http://localhost:8090/shuffle/   → Shuffle SOAR
+  (direct: http://localhost:3002)
+  
+  Shuffle : si /shuffle/ ne fonctionne pas via nginx,
+  ▎ accède directement via http://localhost:3002 — le
+  ▎ frontend Shuffle fait ses appels API sur
+  ▎ localhost:5001 directement.

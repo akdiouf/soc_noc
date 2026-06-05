@@ -1,0 +1,3 @@
+- pipeline.id: soc-noc
+  path.config: "/usr/share/logstash/pipeline/soc-noc.conf"
+  pipeline.workers: 2

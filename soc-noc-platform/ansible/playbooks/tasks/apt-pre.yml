@@ -1,0 +1,21 @@
+---
+# Inclure avec : - import_tasks: tasks/apt-pre.yml
+# Attend que le verrou apt soit libre et met à jour le cache une seule fois.
+
+- name: Attendre que le verrou apt soit libéré
+  shell: |
+    while fuser /var/lib/apt/lists/lock \
+                /var/lib/dpkg/lock \
+                /var/lib/dpkg/lock-frontend \
+                /var/cache/apt/archives/lock >/dev/null 2>&1; do
+      sleep 3
+    done
+  changed_when: false
+  timeout: 180
+  when: ansible_os_family == "Debian"
+
+- name: Mettre à jour le cache apt (une seule fois)
+  apt:
+    update_cache: true
+    cache_valid_time: 3600
+  when: ansible_os_family == "Debian"

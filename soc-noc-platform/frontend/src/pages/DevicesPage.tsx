@@ -3,8 +3,9 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { devices as devicesApi } from "../services/api";
 import { StatusDot } from "../components/common/StatusDot";
 import type { Device, DeviceType, DeviceSite, DeviceStatus } from "../types";
-import { Search, Plus, Settings, Wrench } from "lucide-react";
+import { Search, Plus, Settings, Wrench, Trash2 } from "lucide-react";
 import toast from "react-hot-toast";
+import { DeviceFormModal } from "./DeviceFormModal";
 
 const DEVICE_TYPE_LABELS: Record<string, string> = {
   router: "Routeur", switch: "Switch", firewall: "Firewall",
@@ -31,6 +32,8 @@ export function DevicesPage() {
   const [typeFilter, setTypeFilter] = useState<DeviceType | "">("");
   const [statusFilter, setStatusFilter] = useState<DeviceStatus | "">("");
   const [page, setPage] = useState(1);
+  const [modalDevice, setModalDevice] = useState<Device | null | undefined>(undefined);
+  const [deleteTarget, setDeleteTarget] = useState<Device | null>(null);
 
   const { data, isLoading } = useQuery({
     queryKey: ["devices", { search, siteFilter, typeFilter, statusFilter, page }],
@@ -57,6 +60,16 @@ export function DevicesPage() {
     refetchInterval: 30_000,
   });
 
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => devicesApi.delete(id),
+    onSuccess: () => {
+      toast.success("Équipement supprimé");
+      setDeleteTarget(null);
+      qc.invalidateQueries({ queryKey: ["devices"] });
+    },
+    onError: () => toast.error("Erreur lors de la suppression"),
+  });
+
   const maintenanceMutation = useMutation({
     mutationFn: ({ id, enable }: { id: string; enable: boolean }) =>
       devicesApi.toggleMaintenance(id, enable),
@@ -69,17 +82,44 @@ export function DevicesPage() {
   const totalPages = Math.ceil((data?.total || 0) / 50);
 
   return (
+    <>
     <div className="p-6 space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-gray-900">Équipements</h1>
         <div className="flex items-center gap-2">
           <span className="text-sm text-gray-500">{data?.total || 0} équipements</span>
-          <button className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700">
+          <button
+            onClick={() => setModalDevice(null)}
+            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700"
+          >
             <Plus className="w-4 h-4" />
             Ajouter
           </button>
         </div>
       </div>
+
+      {/* Résumé par type */}
+      {byType && byType.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {byType.map(({ type, count }: { type: string; count: number }) => (
+            <button
+              key={type}
+              onClick={() => setTypeFilter(type === typeFilter ? "" : type as DeviceType)}
+              className={`flex items-center gap-1.5 px-3 py-1 rounded-full border text-xs font-medium transition-all ${
+                typeFilter === type
+                  ? "bg-blue-600 text-white border-blue-600"
+                  : "bg-white text-gray-600 border-gray-200 hover:border-blue-300"
+              }`}
+            >
+              <span>{DEVICE_TYPE_ICON[type] || "📦"}</span>
+              <span>{DEVICE_TYPE_LABELS[type] || type}</span>
+              <span className={typeFilter === type ? "text-blue-200" : "text-gray-400"}>
+                {count}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Résumé par statut */}
       <div className="grid grid-cols-3 lg:grid-cols-6 gap-3">
@@ -223,7 +263,8 @@ export function DevicesPage() {
                 <td className="px-4 py-3 text-right">
                   <div className="flex items-center justify-end gap-1">
                     <button
-                      title="Paramètres"
+                      title="Modifier"
+                      onClick={() => setModalDevice(device)}
                       className="p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded"
                     >
                       <Settings className="w-4 h-4" />
@@ -241,6 +282,13 @@ export function DevicesPage() {
                       }`}
                     >
                       <Wrench className="w-4 h-4" />
+                    </button>
+                    <button
+                      title="Supprimer"
+                      onClick={() => setDeleteTarget(device)}
+                      className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded"
+                    >
+                      <Trash2 className="w-4 h-4" />
                     </button>
                   </div>
                 </td>
@@ -275,5 +323,48 @@ export function DevicesPage() {
         )}
       </div>
     </div>
+
+    {modalDevice !== undefined && (
+      <DeviceFormModal
+        device={modalDevice}
+        onClose={() => setModalDevice(undefined)}
+      />
+    )}
+
+    {deleteTarget && (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+        <div className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-sm mx-4">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center flex-shrink-0">
+              <Trash2 className="w-5 h-5 text-red-600" />
+            </div>
+            <div>
+              <h3 className="font-semibold text-gray-900">Supprimer l'équipement</h3>
+              <p className="text-sm text-gray-500">Cette action est irréversible.</p>
+            </div>
+          </div>
+          <div className="bg-gray-50 rounded-lg px-4 py-3 mb-5 text-sm">
+            <div className="font-medium text-gray-900">{deleteTarget.name}</div>
+            <div className="text-gray-500 font-mono text-xs mt-0.5">{deleteTarget.ip_address}</div>
+          </div>
+          <div className="flex gap-3">
+            <button
+              onClick={() => setDeleteTarget(null)}
+              className="flex-1 px-4 py-2 text-sm border rounded-lg hover:bg-gray-50"
+            >
+              Annuler
+            </button>
+            <button
+              onClick={() => deleteMutation.mutate(deleteTarget.id)}
+              disabled={deleteMutation.isPending}
+              className="flex-1 px-4 py-2 text-sm bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50"
+            >
+              {deleteMutation.isPending ? "Suppression..." : "Supprimer"}
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+    </>
   );
 }

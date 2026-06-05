@@ -1,6 +1,6 @@
 import axios, { AxiosInstance } from "axios";
 import type {
-  Device, Alert, Incident, User, MetricPoint, PaginatedResponse,
+  Device, Alert, Incident, IncidentTimeline, User, MetricPoint, PaginatedResponse,
   AlertSeverity, AlertStatus, AlertCategory,
   DeviceType, DeviceSite, DeviceStatus,
 } from "../types";
@@ -127,11 +127,38 @@ export const incidents = {
   update: async (id: string, payload: Partial<Incident>): Promise<Incident> =>
     (await http.put(`/incidents/${id}`, payload)).data,
 
+  getTimeline: async (id: string): Promise<IncidentTimeline[]> =>
+    (await http.get(`/incidents/${id}/timeline`)).data,
+
   addTimeline: async (id: string, event_type: string, message: string) =>
     (await http.post(`/incidents/${id}/timeline`, { event_type, message })).data,
 
   mttrStats: async (days?: number) =>
     (await http.get("/incidents/stats/mttr", { params: { days } })).data,
+
+  pushToTheHive: async (id: string): Promise<Incident> =>
+    (await http.post(`/incidents/${id}/thehive`)).data,
+};
+
+// ─── Users ───────────────────────────────────────────────────────────────────
+export const users = {
+  list: async (): Promise<User[]> =>
+    (await http.get("/auth/users")).data,
+
+  create: async (payload: {
+    email: string; username: string; full_name?: string;
+    password: string; role: User["role"]; phone?: string;
+  }): Promise<User> =>
+    (await http.post("/auth/users", payload)).data,
+
+  update: async (id: string, payload: Partial<{
+    full_name: string; role: User["role"]; phone: string;
+    is_active: boolean; on_call: boolean; password: string;
+  }>): Promise<User> =>
+    (await http.patch(`/auth/users/${id}`, payload)).data,
+
+  delete: async (id: string): Promise<void> =>
+    void (await http.delete(`/auth/users/${id}`)),
 };
 
 // ─── Metrics ─────────────────────────────────────────────────────────────────

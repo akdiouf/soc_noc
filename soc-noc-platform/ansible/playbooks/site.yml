@@ -1,0 +1,21 @@
+---
+# Playbook maître — déploiement complet SOC/NOC
+#
+# Usages :
+#   Tout déployer           : ansible-playbook -i inventory/hosts.yml playbooks/site.yml
+#   Plateforme uniquement   : ansible-playbook -i inventory/hosts.yml playbooks/site.yml --tags platform
+#   Agents uniquement       : ansible-playbook -i inventory/hosts.yml playbooks/site.yml --tags agents
+#   Équipements réseau seuls: ansible-playbook -i inventory/hosts.yml playbooks/site.yml --tags network
+#
+# Ou directement via les playbooks dédiés :
+#   ansible-playbook -i inventory/hosts.yml playbooks/deploy-platform.yml
+#   ansible-playbook -K -i inventory/hosts.yml playbooks/deploy-platform.yml -e "ansible_port=1243"
+#   ansible-playbook -K -i inventory/hosts.yml playbooks/deploy-agents.yml -e "ansible_port=1243"
+
+- name: "ÉTAPE 1 — Plateforme NOC/SOC"
+  import_playbook: deploy-platform.yml
+  tags: platform
+
+- name: "ÉTAPE 2 — Agents de monitoring (Linux)"
+  import_playbook: deploy-agents.yml
+  tags: agents

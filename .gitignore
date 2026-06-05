@@ -1,2 +1,9 @@
 .claude/
 .vscode/
+soc-noc-platform/secrets/
+soc-noc-platform/.env
+# TheHive runtime data (bind mount)
+soc-noc-platform/docker/thehive/data/db/*
+soc-noc-platform/docker/thehive/data/index/*
+soc-noc-platform/docker/thehive/data/files/*
+!soc-noc-platform/docker/thehive/data/**/.gitkeep

@@ -1,0 +1,232 @@
+---
+# Déploiement LOCAL de la plateforme NOC/SOC (HTTP uniquement, pas de certbot)
+#
+# Usage :
+#   ansible-playbook -i inventory/hosts-local.yml playbooks/deploy-platform-local.yml
+#   ansible-playbook -i inventory/hosts-local.yml playbooks/deploy-platform-local.yml --tags docker
+#   ansible-playbook -i inventory/hosts-local.yml playbooks/deploy-platform-local.yml --tags compose
+#
+# Pré-requis : rsync installé localement (apt install rsync)
+# Accès après déploiement : http://localhost:8090/
+
+- name: Déployer la plateforme NOC/SOC en local (HTTP)
+  hosts: noc_platform_local
+  become: true
+  gather_facts: true
+
+  vars:
+    # Répertoire cible sur la machine locale
+    platform_dir: /opt/soc-noc-platform
+    compose_dir: "{{ platform_dir }}/docker"
+
+  pre_tasks:
+    - name: Mettre à jour le cache apt
+      apt:
+        update_cache: true
+        cache_valid_time: 3600
+      when: ansible_os_family == "Debian"
+
+  tasks:
+    # ─── Docker ────────────────────────────────────────────────────────────────
+    - name: Vérifier si Docker est déjà installé
+      command: docker --version
+      register: docker_check
+      failed_when: false
+      changed_when: false
+      tags: docker
+
+    - name: Installer les dépendances Docker
+      apt:
+        name:
+          - ca-certificates
+          - curl
+          - gnupg
+          - lsb-release
+          - rsync
+        state: present
+      when:
+        - ansible_os_family == "Debian"
+        - docker_check.rc != 0
+      tags: docker
+
+    - name: Supprimer l'ancienne clé GPG Docker (nettoyage)
+      file:
+        path: /usr/share/keyrings/docker.gpg
+        state: absent
+      when:
+        - ansible_os_family == "Debian"
+        - docker_check.rc != 0
+      tags: docker
+
+    - name: Télécharger et déarmoriser la clé GPG Docker
+      shell: >
+        curl -fsSL https://download.docker.com/linux/ubuntu/gpg
+        | gpg --dearmor -o /usr/share/keyrings/docker.gpg
+        && chmod 0644 /usr/share/keyrings/docker.gpg
+      when:
+        - ansible_os_family == "Debian"
+        - docker_check.rc != 0
+      tags: docker
+
+    - name: Ajouter le dépôt Docker
+      apt_repository:
+        repo: "deb [arch=amd64 signed-by=/usr/share/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
+        filename: docker
+        state: present
+      when:
+        - ansible_os_family == "Debian"
+        - docker_check.rc != 0
+      tags: docker
+
+    - name: Installer Docker Engine
+      apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-buildx-plugin
+          - docker-compose-plugin
+        state: present
+      when:
+        - ansible_os_family == "Debian"
+        - docker_check.rc != 0
+      tags: docker
+
+    - name: Démarrer et activer Docker
+      systemd:
+        name: docker
+        state: started
+        enabled: true
+      tags: docker
+
+    - name: Ajouter l'utilisateur courant au groupe docker
+      user:
+        name: "{{ ansible_user_id }}"
+        groups: docker
+        append: true
+      tags: docker
+
+    # ─── Répertoire de la plateforme ──────────────────────────────────────────
+    - name: Créer le répertoire de la plateforme
+      file:
+        path: "{{ platform_dir }}"
+        state: directory
+        mode: '0755'
+      tags: sync
+
+    - name: Copier les fichiers de la plateforme
+      synchronize:
+        src: "{{ playbook_dir }}/../../"
+        dest: "{{ platform_dir }}/"
+        delete: false
+        recursive: true
+        rsync_opts:
+          - "--exclude=.git"
+          - "--exclude=__pycache__"
+          - "--exclude=*.pyc"
+          - "--exclude=node_modules"
+          - "--exclude=.env.example"
+      tags: sync
+
+    - name: Vérifier la présence du fichier .env dans docker/
+      stat:
+        path: "{{ compose_dir }}/.env"
+      register: env_file
+      tags: sync
+
+    - name: Copier .env depuis la racine vers docker/ si absent
+      copy:
+        src: "{{ platform_dir }}/.env"
+        dest: "{{ compose_dir }}/.env"
+        remote_src: true
+      when: not env_file.stat.exists
+      tags: sync
+
+    # ─── Répertoires de données (permissions) ─────────────────────────────────
+    - name: Créer les répertoires de données TheHive (uid 1000)
+      file:
+        path: "{{ compose_dir }}/thehive/data/{{ item }}"
+        state: directory
+        mode: '0777'
+      loop:
+        - db
+        - index
+        - files
+      tags: data_dirs
+
+    - name: Créer les répertoires de données Wazuh
+      file:
+        path: "{{ compose_dir }}/wazuh/{{ item }}"
+        state: directory
+        mode: '0755'
+      loop:
+        - certs
+        - data
+      tags: data_dirs
+
+    # ─── vm.max_map_count pour Elasticsearch / Wazuh Indexer ─────────────────
+    - name: Augmenter vm.max_map_count (requis par Elasticsearch)
+      sysctl:
+        name: vm.max_map_count
+        value: '262144'
+        sysctl_set: true
+        state: present
+        reload: true
+      tags: sysctl
+
+    # ─── Déploiement Docker Compose ───────────────────────────────────────────
+    - name: Arrêter les anciens conteneurs (si existants)
+      community.docker.docker_compose_v2:
+        project_src: "{{ compose_dir }}"
+        state: absent
+      ignore_errors: true
+      tags: compose
+
+    - name: Construire et démarrer la plateforme
+      community.docker.docker_compose_v2:
+        project_src: "{{ compose_dir }}"
+        state: present
+        build: always
+      tags: compose
+
+    - name: Attendre que les services principaux soient disponibles
+      wait_for:
+        host: localhost
+        port: "{{ item.port }}"
+        timeout: 120
+        delay: 10
+      loop:
+        - { port: 8090,  name: 'nginx (entrée principale)' }
+        - { port: 5432,  name: 'PostgreSQL' }
+        - { port: 6379,  name: 'Redis' }
+      tags: compose
+
+    - name: Vérifier que les conteneurs critiques tournent
+      community.docker.docker_container_info:
+        name: "{{ item }}"
+      register: container_info
+      loop:
+        - soc_backend
+        - soc_prometheus
+        - soc_grafana
+        - soc_nginx
+      failed_when: not container_info.container.State.Running
+      tags: compose
+
+    # ─── Récapitulatif ────────────────────────────────────────────────────────
+    - name: Afficher les URLs d'accès
+      debug:
+        msg:
+          - "Plateforme déployée avec succès !"
+          - "Frontend     : http://localhost:8090/"
+          - "API (docs)   : http://localhost:8090/docs"
+          - "Grafana      : http://localhost:8090/grafana/"
+          - "Kibana        : http://localhost:8090/kibana"
+          - "Prometheus   : http://localhost:8090/prometheus/"
+          - "Alertmanager : http://localhost:8090/alerts/"
+          - "TheHive      : http://localhost:8090/thehive"
+          - "Cortex       : http://localhost:8090/cortex"
+          - "Wazuh         : http://localhost:8090/wazuh"
+          - "NetBox        : http://localhost:8090/netbox"
+          - "Shuffle SOAR : http://localhost:8090/shuffle/"
+      tags: compose

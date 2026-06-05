@@ -22,7 +22,10 @@ export function useWebSocket(path: string, opts: UseWebSocketOptions = {}) {
     const token = localStorage.getItem("access_token");
     if (!token) return;
 
-    const base = import.meta.env.VITE_WS_URL || "ws://localhost:8000/api/v1";
+    const base = import.meta.env.VITE_WS_URL || (() => {
+      const proto = window.location.protocol === "https:" ? "wss" : "ws";
+      return `${proto}://${window.location.host}/api/v1`;
+    })();
     const url = `${base}${path}?token=${token}`;
 
     const ws = new WebSocket(url);

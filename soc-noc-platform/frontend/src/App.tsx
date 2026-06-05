@@ -13,6 +13,8 @@ import { PowerPage } from "./pages/physical/PowerPage";
 import { CoolingPage } from "./pages/physical/CoolingPage";
 import { AccessControlPage } from "./pages/physical/AccessControlPage";
 import { SecurityEventsPage } from "./pages/soc/SecurityEventsPage";
+import { SecurityIncidentsPage } from "./pages/soc/SecurityIncidentsPage";
+import { SettingsPage } from "./pages/SettingsPage";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -62,8 +64,8 @@ export default function App() {
                   <Route path="/physical/cooling" element={<CoolingPage />} />
                   <Route path="/physical/access" element={<AccessControlPage />} />
                   <Route path="/soc/events" element={<SecurityEventsPage />} />
-                  <Route path="/soc/incidents" element={<PlaceholderPage title="Incidents Sécurité" description="Gestion des incidents SOC avec intégration TheHive — en développement." />} />
-                  <Route path="/settings" element={<PlaceholderPage title="Paramètres" description="Configuration de la plateforme, utilisateurs, seuils, intégrations." />} />
+                  <Route path="/soc/incidents" element={<SecurityIncidentsPage />} />
+                  <Route path="/settings" element={<SettingsPage />} />
                 </Routes>
               </ProtectedLayout>
             }

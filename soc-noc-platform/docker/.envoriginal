@@ -1,0 +1,49 @@
+# ─── Base de données ──────────────────────────────────────────────────────────
+POSTGRES_PASSWORD=SecurePass123
+
+# ─── InfluxDB ─────────────────────────────────────────────────────────────────
+INFLUXDB_PASSWORD=ChangeMeSecureP@ss123
+INFLUXDB_TOKEN=change-me-generate-a-strong-random-token
+
+# ─── Redis ────────────────────────────────────────────────────────────────────
+REDIS_PASSWORD=ChangeMeSecureP@ss123
+
+# ─── Grafana ──────────────────────────────────────────────────────────────────
+GRAFANA_PASSWORD=ChangeMeSecureP@ss123
+
+# ─── NetBox (CMDB) ────────────────────────────────────────────────────────────
+NETBOX_PASSWORD=ChangeMeSecureP@ss123
+NETBOX_SECRET_KEY=generate-50-char-random-secret-key
+
+# ─── Shuffle (SOAR) ───────────────────────────────────────────────────────────
+SHUFFLE_PASSWORD=ChangeMeSecureP@ss123
+
+# ─── Backend ──────────────────────────────────────────────────────────────────
+SECRET_KEY=generate-a-long-random-secret-key-here
+
+# ─── Premier super-admin (créé automatiquement au premier démarrage) ───────────
+FIRST_SUPERUSER_USERNAME=admin
+FIRST_SUPERUSER_EMAIL=admin@socnoc.local
+FIRST_SUPERUSER_PASSWORD=ChangeMe123!
+FIRST_SUPERUSER_FULLNAME=Administrateur SOC/NOC
+
+# ─── Notifications ────────────────────────────────────────────────────────────
+# Email
+SMTP_HOST=smtp.example.com
+SMTP_PORT=587
+SMTP_USER=noc@datacenter.local
+SMTP_PASSWORD=your-smtp-password
+
+# Slack
+SLACK_WEBHOOK_URL=https://hooks.slack.com/services/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
+
+# Teams
+TEAMS_WEBHOOK_URL=https://your-org.webhook.office.com/webhookb2/XXXXX
+
+# PagerDuty
+PAGERDUTY_SERVICE_KEY=your-pagerduty-integration-key
+
+# ─── Intégrations SOC ─────────────────────────────────────────────────────────
+THEHIVE_API_KEY=your-thehive-api-key
+WAZUH_API_PASSWORD=wazuh-api-password
+NETBOX_TOKEN=your-netbox-api-token
