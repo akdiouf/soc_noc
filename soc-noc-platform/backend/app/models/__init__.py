@@ -4,6 +4,7 @@ from app.models.incident import Incident, IncidentSeverity, IncidentStatus
 from app.models.user import User, UserRole
 from app.models.metric import MetricThreshold
 from app.models.topology import NetworkLink
+from app.models.threat_intel import IOCCache, IOCType
 
 __all__ = [
     "Device", "DeviceType", "DeviceSite",
@@ -12,4 +13,5 @@ __all__ = [
     "User", "UserRole",
     "MetricThreshold",
     "NetworkLink",
+    "IOCCache", "IOCType",
 ]

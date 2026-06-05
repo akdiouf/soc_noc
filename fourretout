@@ -161,3 +161,16 @@ To start the stack locally:
   ▎ accède directement via http://localhost:3002 — le
   ▎ frontend Shuffle fait ses appels API sur
   ▎ localhost:5001 directement.
+
+
+  Étapes post-démarrage
+
+  1. Démarrer : docker compose up -d misp-db misp misp-modules
+  2. Attendre l'init MISP (≈2-3 min) puis ouvrir http://localhost:8081
+  3. Se connecter avec admin@socnoc.local / MISPAdmin@2024
+  4. Aller dans Administration → Auth keys → Ajouter une clé
+  5. Copier la clé dans .env : MISP_API_KEY=<votre_clé>
+  6. Redémarrer backend + celery : docker compose up -d backend celery-worker
+  celery-beat
+  7. La première synchronisation se lancera automatiquement (ou manuellement
+  depuis la page Threat Intel)

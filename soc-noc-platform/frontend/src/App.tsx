@@ -14,6 +14,7 @@ import { CoolingPage } from "./pages/physical/CoolingPage";
 import { AccessControlPage } from "./pages/physical/AccessControlPage";
 import { SecurityEventsPage } from "./pages/soc/SecurityEventsPage";
 import { SecurityIncidentsPage } from "./pages/soc/SecurityIncidentsPage";
+import { ThreatIntelPage } from "./pages/soc/ThreatIntelPage";
 import { SettingsPage } from "./pages/SettingsPage";
 
 const queryClient = new QueryClient({
@@ -65,6 +66,7 @@ export default function App() {
                   <Route path="/physical/access" element={<AccessControlPage />} />
                   <Route path="/soc/events" element={<SecurityEventsPage />} />
                   <Route path="/soc/incidents" element={<SecurityIncidentsPage />} />
+                  <Route path="/soc/threat-intel" element={<ThreatIntelPage />} />
                   <Route path="/settings" element={<SettingsPage />} />
                 </Routes>
               </ProtectedLayout>

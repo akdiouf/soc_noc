@@ -139,3 +139,65 @@ export interface PaginatedResponse<T> {
   page: number;
   size: number;
 }
+
+// ─── Threat Intelligence (MISP) ───────────────────────────────────────────────
+export type IOCType =
+  | "ip-dst" | "ip-src" | "domain" | "hostname" | "url"
+  | "md5" | "sha1" | "sha256" | "sha512"
+  | "email-src" | "email-dst" | "filename"
+  | "mutex" | "regkey" | "user-agent" | "ip-dst|port" | "other";
+
+export interface IOC {
+  id: string;
+  value: string;
+  ioc_type: IOCType;
+  misp_event_id: number;
+  misp_event_uuid: string;
+  misp_event_title?: string;
+  misp_org?: string;
+  threat_level: number;          // 1=High 2=Medium 3=Low 4=Undefined
+  tlp: "white" | "green" | "amber" | "red";
+  category?: string;
+  comment?: string;
+  tags: string[];
+  to_ids: boolean;
+  misp_timestamp?: string;
+  first_seen: string;
+  last_seen: string;
+  synced_at: string;
+  hit_count: number;
+}
+
+export interface IOCLookupResponse {
+  value: string;
+  found: boolean;
+  threat_level?: number;
+  iocs: IOC[];
+}
+
+export interface MISPStatus {
+  connected: boolean;
+  url: string;
+  version?: string;
+  organization?: string;
+  error?: string;
+}
+
+export interface IOCStats {
+  total: number;
+  by_type: Record<string, number>;
+  by_threat_level: Record<string, number>;
+  by_tlp: Record<string, number>;
+  last_sync?: string;
+}
+
+export interface MISPEvent {
+  event_id: number;
+  uuid: string;
+  title: string;
+  org?: string;
+  threat_level: number;
+  attribute_count: number;
+  tags: string[];
+  date?: string;
+}

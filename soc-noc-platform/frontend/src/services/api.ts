@@ -3,6 +3,7 @@ import type {
   Device, Alert, Incident, IncidentTimeline, User, MetricPoint, PaginatedResponse,
   AlertSeverity, AlertStatus, AlertCategory,
   DeviceType, DeviceSite, DeviceStatus,
+  IOC, IOCType, IOCLookupResponse, MISPStatus, IOCStats, MISPEvent,
 } from "../types";
 
 const BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8000/api/v1";
@@ -159,6 +160,34 @@ export const users = {
 
   delete: async (id: string): Promise<void> =>
     void (await http.delete(`/auth/users/${id}`)),
+};
+
+// ─── Threat Intelligence ─────────────────────────────────────────────────────
+export const threatIntel = {
+  status: async (): Promise<MISPStatus> =>
+    (await http.get("/threat-intel/status")).data,
+
+  stats: async (): Promise<IOCStats> =>
+    (await http.get("/threat-intel/iocs/stats")).data,
+
+  listIOCs: async (params?: {
+    ioc_type?: IOCType;
+    threat_level?: number;
+    tlp?: string;
+    search?: string;
+    page?: number;
+    size?: number;
+  }): Promise<PaginatedResponse<IOC>> =>
+    (await http.get("/threat-intel/iocs", { params })).data,
+
+  lookup: async (value: string, ioc_type?: IOCType): Promise<IOCLookupResponse> =>
+    (await http.post("/threat-intel/iocs/lookup", { value, ioc_type })).data,
+
+  events: async (days = 7): Promise<MISPEvent[]> =>
+    (await http.get("/threat-intel/events", { params: { days } })).data,
+
+  triggerSync: async () =>
+    (await http.post("/threat-intel/sync")).data,
 };
 
 // ─── Metrics ─────────────────────────────────────────────────────────────────

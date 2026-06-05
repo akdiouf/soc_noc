@@ -111,6 +111,13 @@ class Settings(BaseSettings):
     NETBOX_URL: str = "http://localhost:8080"
     NETBOX_TOKEN: str = ""
 
+    # MISP — Threat Intelligence
+    MISP_URL: str = "http://misp:80"
+    MISP_API_KEY: str = ""
+    MISP_VERIFY_CERT: bool = False
+    MISP_ORG: str = "SOCNOC"
+    MISP_SYNC_DAYS: int = 30
+
     # Failover
     FAILOVER_SITE_URL: Optional[str] = None
     FAILOVER_SITE_NAME: str = "Site de repli"

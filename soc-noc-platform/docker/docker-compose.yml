@@ -22,6 +22,9 @@ volumes:
   shuffle_opensearch_data:
   shuffle_apps:
   shuffle_files:
+  misp_data:
+  misp_db_data:
+  cortex_es_data:
 
 services:
   # ─────────────────────────────────────────────
@@ -293,12 +296,12 @@ services:
       - wazuh-indexer
       - wazuh-manager
     environment:
-      INDEXER_URL: http://wazuh-indexer:9200
+      INDEXER_URL: https://wazuh-indexer:9200
       INDEXER_USERNAME: admin
       INDEXER_PASSWORD: admin
       DASHBOARD_USERNAME: kibanaserver
       DASHBOARD_PASSWORD: kibanaserver
-      WAZUH_API_URL: http://wazuh-manager
+      WAZUH_API_URL: https://wazuh-manager
       WAZUH_API_PORT: 55000
       API_USERNAME: wazuh-wui
       API_PASSWORD: ${WAZUH_API_PASSWORD:-MyS3cr37P450r.*-}
@@ -350,7 +353,7 @@ services:
     depends_on:
       - wazuh-indexer
     environment:
-      INDEXER_URL: http://wazuh.indexer:9200
+      INDEXER_URL: https://wazuh.indexer:9200
       INDEXER_USERNAME: admin
       INDEXER_PASSWORD: admin
       FILEBEAT_SSL_VERIFICATION_MODE: none
@@ -366,6 +369,79 @@ services:
         ipv4_address: 172.20.0.50
 
   # ─────────────────────────────────────────────
+  # SOC - THREAT INTELLIGENCE (MISP)
+  # ─────────────────────────────────────────────
+  misp-db:
+    image: mariadb:10.11
+    container_name: soc_misp_db
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MISP_MYSQL_ROOT_PASSWORD:-MISPRootP@ss2024}
+      MYSQL_DATABASE: misp
+      MYSQL_USER: misp
+      MYSQL_PASSWORD: ${MISP_MYSQL_PASSWORD:-MISPDbP@ss2024}
+    volumes:
+      - misp_db_data:/var/lib/mysql
+    networks:
+      soc_noc_net:
+        ipv4_address: 172.20.0.63
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  misp:
+    image: ghcr.io/misp/misp-docker/misp-core:latest
+    container_name: soc_misp
+    restart: unless-stopped
+    depends_on:
+      misp-db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    environment:
+      MYSQL_HOST: misp-db
+      MYSQL_PORT: 3306
+      MYSQL_DATABASE: misp
+      MYSQL_USER: misp
+      MYSQL_PASSWORD: ${MISP_MYSQL_PASSWORD:-MISPDbP@ss2024}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-SecureP@ss123}
+      BASE_URL: http://localhost:8081
+      DISABLE_SSL_REDIRECT: "true"
+      MISP_UUID: ${MISP_UUID:-}
+      SALT: ${MISP_SALT:-Rrtf1tHXXBdFtN5d8VD4rQ==}
+      MISP_ORG: ${MISP_ORG:-SOCNOC}
+      SETTING_EMAIL: ${MISP_ADMIN_EMAIL:-admin@socnoc.local}
+      ADMIN_EMAIL: ${MISP_ADMIN_EMAIL:-admin@socnoc.local}
+      ADMIN_PASSWORD: ${MISP_ADMIN_PASSWORD:-MISPAdmin@2024}
+      MISP_MODULES_FQDN: http://misp-modules:6666
+      CRON_USER_ID: 1
+      WORKERS: 1
+    volumes:
+      - misp_data:/var/www/MISP/app/files
+    ports:
+      - "8081:80"
+      - "9443:443"
+    networks:
+      soc_noc_net:
+        ipv4_address: 172.20.0.62
+
+  misp-modules:
+    image: ghcr.io/misp/misp-docker/misp-modules:latest
+    container_name: soc_misp_modules
+    restart: unless-stopped
+    environment:
+      REDIS_BACKEND: redis
+      REDIS_PORT: 6379
+      REDIS_PW: ${REDIS_PASSWORD:-SecureP@ss123}
+    networks:
+      soc_noc_net:
+        ipv4_address: 172.20.0.64
+
+  # ─────────────────────────────────────────────
   # SOC - INCIDENT RESPONSE
   # ─────────────────────────────────────────────
   thehive:
@@ -373,7 +449,7 @@ services:
     container_name: soc_thehive
     restart: unless-stopped
     depends_on:
-      - elasticsearch
+      - elasticsearch-cortex
       - cortex
     environment:
       - JVM_OPTS=-Xms512m -Xmx1g -Dconfig.file=/etc/thehive/application.conf
@@ -381,23 +457,43 @@ services:
       - ./thehive/application.conf:/etc/thehive/application.conf:ro
       - ./thehive/data:/opt/thehive/data
     ports:
-      - "9000:9000"
+      - "9070:9000"   # 9000 réservé Hyper-V → accès direct http://localhost:9070
     networks:
       soc_noc_net:
         ipv4_address: 172.20.0.60
+
+  elasticsearch-cortex:
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.17.15
+    container_name: soc_elasticsearch_cortex
+    restart: unless-stopped
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+      - cluster.name=cortex-cluster
+      - bootstrap.memory_lock=true
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    volumes:
+      - cortex_es_data:/usr/share/elasticsearch/data
+    networks:
+      soc_noc_net:
+        ipv4_address: 172.20.0.65
 
   cortex:
     image: thehiveproject/cortex:3.1.7
     container_name: soc_cortex
     restart: unless-stopped
     depends_on:
-      - elasticsearch
+      - elasticsearch-cortex
     environment:
       - JVM_OPTS=-Xms512m -Xmx1g -Dconfig.file=/etc/cortex/application.conf
     volumes:
       - ./cortex/application.conf:/etc/cortex/application.conf:ro
     ports:
-      - "9001:9001"
+      - "9071:9001"   # 9001 réservé Hyper-V → accès direct http://localhost:9071
     networks:
       soc_noc_net:
         ipv4_address: 172.20.0.61
@@ -529,6 +625,10 @@ services:
       FIRST_SUPERUSER_EMAIL: ${FIRST_SUPERUSER_EMAIL:-admin@socnoc.local}
       FIRST_SUPERUSER_PASSWORD: ${FIRST_SUPERUSER_PASSWORD}
       FIRST_SUPERUSER_FULLNAME: ${FIRST_SUPERUSER_FULLNAME:-Administrateur SOC/NOC}
+      MISP_URL: http://misp:80
+      MISP_API_KEY: ${MISP_API_KEY:-}
+      MISP_ORG: ${MISP_ORG:-SOCNOC}
+      MISP_VERIFY_CERT: "false"
     ports:
       - "8000:8000"
     volumes:
@@ -554,6 +654,10 @@ services:
       INFLUXDB_TOKEN: ${INFLUXDB_TOKEN:-my-super-secret-token}
       REDIS_URL: redis://:${REDIS_PASSWORD:-SecureP@ss123}@redis:6379/0
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      MISP_URL: http://misp:80
+      MISP_API_KEY: ${MISP_API_KEY:-}
+      MISP_ORG: ${MISP_ORG:-SOCNOC}
+      MISP_VERIFY_CERT: "false"
     networks:
       soc_noc_net:
         ipv4_address: 172.20.0.81
@@ -612,7 +716,7 @@ services:
       - ./nginx/ssl:/etc/nginx/ssl
     ports:
       - "8090:80"
-      - "8443:443"
+      - "4443:443"
     networks:
       soc_noc_net:
         ipv4_address: 172.20.0.100

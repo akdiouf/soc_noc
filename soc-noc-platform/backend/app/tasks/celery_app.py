@@ -9,6 +9,7 @@ celery_app = Celery(
     include=[
         "app.tasks.polling_tasks",
         "app.tasks.maintenance_tasks",
+        "app.tasks.misp_tasks",
     ],
 )
 
@@ -62,6 +63,11 @@ celery_app.conf.update(
         "monthly-sla-report": {
             "task": "app.tasks.maintenance_tasks.generate_sla_report",
             "schedule": crontab(day_of_month=1, hour=6, minute=0),
+        },
+        # Synchronisation MISP (IOC feeds) toutes les 6h
+        "sync-misp-iocs": {
+            "task": "app.tasks.misp_tasks.sync_misp_iocs",
+            "schedule": crontab(minute=0, hour="*/6"),
         },
     },
 )
