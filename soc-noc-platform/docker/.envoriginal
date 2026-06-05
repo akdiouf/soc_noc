@@ -1,30 +1,30 @@
 # ─── Base de données ──────────────────────────────────────────────────────────
-POSTGRES_PASSWORD=SecurePass123
+POSTGRES_PASSWORD=
 
 # ─── InfluxDB ─────────────────────────────────────────────────────────────────
-INFLUXDB_PASSWORD=ChangeMeSecureP@ss123
-INFLUXDB_TOKEN=change-me-generate-a-strong-random-token
+INFLUXDB_PASSWORD=
+INFLUXDB_TOKEN=
 
 # ─── Redis ────────────────────────────────────────────────────────────────────
-REDIS_PASSWORD=ChangeMeSecureP@ss123
+REDIS_PASSWORD=
 
 # ─── Grafana ──────────────────────────────────────────────────────────────────
-GRAFANA_PASSWORD=ChangeMeSecureP@ss123
+GRAFANA_PASSWORD=
 
 # ─── NetBox (CMDB) ────────────────────────────────────────────────────────────
-NETBOX_PASSWORD=ChangeMeSecureP@ss123
-NETBOX_SECRET_KEY=generate-50-char-random-secret-key
+NETBOX_PASSWORD=
+NETBOX_SECRET_KEY=
 
 # ─── Shuffle (SOAR) ───────────────────────────────────────────────────────────
-SHUFFLE_PASSWORD=ChangeMeSecureP@ss123
+SHUFFLE_PASSWORD=
 
 # ─── Backend ──────────────────────────────────────────────────────────────────
-SECRET_KEY=generate-a-long-random-secret-key-here
+SECRET_KEY=
 
 # ─── Premier super-admin (créé automatiquement au premier démarrage) ───────────
 FIRST_SUPERUSER_USERNAME=admin
 FIRST_SUPERUSER_EMAIL=admin@socnoc.local
-FIRST_SUPERUSER_PASSWORD=ChangeMe123!
+FIRST_SUPERUSER_PASSWORD=
 FIRST_SUPERUSER_FULLNAME=Administrateur SOC/NOC
 
 # ─── Notifications ────────────────────────────────────────────────────────────
@@ -32,11 +32,10 @@ FIRST_SUPERUSER_FULLNAME=Administrateur SOC/NOC
 SMTP_HOST=smtp.example.com
 SMTP_PORT=587
 SMTP_USER=noc@datacenter.local
-SMTP_PASSWORD=your-smtp-password
+SMTP_PASSWORD=
 
 # Slack
-SLACK_WEBHOOK_URL=https://hooks.slack.com/services/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
-
+SLACK_WEBHOOK_URL=
 # Teams
 TEAMS_WEBHOOK_URL=https://your-org.webhook.office.com/webhookb2/XXXXX
 
@@ -45,5 +44,5 @@ PAGERDUTY_SERVICE_KEY=your-pagerduty-integration-key
 
 # ─── Intégrations SOC ─────────────────────────────────────────────────────────
 THEHIVE_API_KEY=your-thehive-api-key
-WAZUH_API_PASSWORD=wazuh-api-password
-NETBOX_TOKEN=your-netbox-api-token
+WAZUH_API_PASSWORD=
+NETBOX_TOKEN=
