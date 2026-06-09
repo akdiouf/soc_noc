@@ -105,7 +105,7 @@ async def update_user(
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
     if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Utilisateur non trouvé")
+        raise HTTPException(status_code=.HTTP_404_NOT_FOUND, detail="Utilisateur non trouvé")
     for field, value in payload.model_dump(exclude_unset=True).items():
         if field == "password" and value:
             user.hashed_password = get_password_hash(value)
@@ -116,7 +116,7 @@ async def update_user(
     return user
 
 
-@router.delete("/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/users/{user_id}", _code=status.HTTP_204_NO_CONTENT)
 async def delete_user(
     user_id: UUID,
     db: AsyncSession = Depends(get_db),

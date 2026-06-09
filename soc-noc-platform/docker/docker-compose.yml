@@ -25,6 +25,7 @@ volumes:
   misp_data:
   misp_db_data:
   cortex_es_data:
+  cortex_jobs:
 
 services:
   # ─────────────────────────────────────────────
@@ -154,6 +155,7 @@ services:
     ports:
       - "5800:5140/udp"
       - "5800:5140/tcp"
+      - "5044:5044"
     networks:
       soc_noc_net:
         ipv4_address: 172.20.0.21
@@ -169,6 +171,8 @@ services:
       SERVER_BASEPATH: /kibana
       SERVER_REWRITEBASEPATH: "true"
       SERVER_PUBLICBASEURL: http://localhost:8090/kibana
+    ports:
+      - "5601:5601"
     networks:
       soc_noc_net:
         ipv4_address: 172.20.0.22
@@ -278,7 +282,11 @@ services:
       REDIS_PASSWORD: ${REDIS_PASSWORD:-SecureP@ss123}
       SECRET_KEY: ${NETBOX_SECRET_KEY:-36fqE9KQvJk0i8abe8HCkdZfydfZrzU7VUohHVeljFnBkozQtqbQQyt6xpkI3O4TXNm770w8TXGnaJ_WizRbfA}
       FORCE_SCRIPT_NAME: /netbox
+      BASE_PATH: netbox
       LOGIN_REQUIRED: "false"
+    volumes:
+      - netbox_data:/opt/netbox/netbox/media
+      - ./netbox/extra.py:/etc/netbox/config/extra.py:ro
     ports:
       - "8080:8080"
     networks:
@@ -309,6 +317,11 @@ services:
       OPENSEARCH_SSL_VERIFICATIONMODE: none
       SERVER_BASEPATH: /wazuh
       SERVER_REWRITEBASEPATH: "true"
+    ports:
+      - "5602:5601"
+    volumes:
+      - ./wazuh/config/opensearch_dashboards.yml:/usr/share/wazuh-dashboard/config/opensearch_dashboards.yml:ro
+      - ./wazuh/config/wazuh.yml:/usr/share/wazuh-dashboard/data/wazuh/config/wazuh.yml
     networks:
       soc_noc_net:
         ipv4_address: 172.20.0.52
@@ -320,12 +333,7 @@ services:
     environment:
       - "OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m"
       - "bootstrap.memory_lock=true"
-      - "discovery.type=single-node"
-      - "cluster.name=wazuh-cluster"
-      - "network.host=0.0.0.0"
-      - "plugins.security.disabled=true"
       - "DISABLE_INSTALL_DEMO_CONFIG=true"
-      - "DISABLE_SECURITY_PLUGIN=true"
     ulimits:
       memlock:
         soft: -1
@@ -335,6 +343,8 @@ services:
         hard: 65536
     volumes:
       - wazuh_indexer_data:/var/lib/wazuh-indexer
+      - ./wazuh/opensearch.yml:/usr/share/wazuh-indexer/opensearch.yml:ro
+      - ./wazuh/opensearch-security/internal_users.yml:/usr/share/wazuh-indexer/opensearch-security/internal_users.yml:ro
       - ./wazuh/certs/indexer.pem:/usr/share/wazuh-indexer/certs/indexer.pem:ro
       - ./wazuh/certs/indexer-key.pem:/usr/share/wazuh-indexer/certs/indexer-key.pem:ro
       - ./wazuh/certs/root-ca.pem:/usr/share/wazuh-indexer/certs/root-ca.pem:ro
@@ -409,7 +419,7 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: 6379
       REDIS_PASSWORD: ${REDIS_PASSWORD:-SecureP@ss123}
-      BASE_URL: http://localhost:8081
+      BASE_URL: https://akisoc.team.akilee.tech/misp
       DISABLE_SSL_REDIRECT: "true"
       MISP_UUID: ${MISP_UUID:-}
       SALT: ${MISP_SALT:-Rrtf1tHXXBdFtN5d8VD4rQ==}
@@ -449,8 +459,10 @@ services:
     container_name: soc_thehive
     restart: unless-stopped
     depends_on:
-      - elasticsearch-cortex
-      - cortex
+      elasticsearch-cortex:
+        condition: service_healthy
+      cortex:
+        condition: service_started
     environment:
       - JVM_OPTS=-Xms512m -Xmx1g -Dconfig.file=/etc/thehive/application.conf
     volumes:
@@ -472,6 +484,12 @@ services:
       - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
       - cluster.name=cortex-cluster
       - bootstrap.memory_lock=true
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health | grep -qv '\"status\":\"red\"'"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
     ulimits:
       memlock:
         soft: -1
@@ -492,6 +510,8 @@ services:
       - JVM_OPTS=-Xms512m -Xmx1g -Dconfig.file=/etc/cortex/application.conf
     volumes:
       - ./cortex/application.conf:/etc/cortex/application.conf:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+      - cortex_jobs:/tmp/cortex-jobs
     ports:
       - "9071:9001"   # 9001 réservé Hyper-V → accès direct http://localhost:9071
     networks:

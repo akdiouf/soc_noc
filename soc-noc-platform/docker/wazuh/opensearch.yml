@@ -5,8 +5,33 @@ http.port: 9200
 
 # Single-node mode (disables bootstrap checks)
 discovery.type: single-node
-cluster.initial_cluster_manager_nodes:
-  - wazuh-indexer-node
 
-# Disable security plugin for local testing (no TLS/certs needed)
-plugins.security.disabled: true
+# TLS — transport layer
+plugins.security.ssl.transport.pemcert_filepath: certs/indexer.pem
+plugins.security.ssl.transport.pemkey_filepath: certs/indexer-key.pem
+plugins.security.ssl.transport.pemtrustedcas_filepath: certs/root-ca.pem
+plugins.security.ssl.transport.enforce_hostname_verification: false
+
+# TLS — HTTP/REST layer
+plugins.security.ssl.http.enabled: true
+plugins.security.ssl.http.pemcert_filepath: certs/indexer.pem
+plugins.security.ssl.http.pemkey_filepath: certs/indexer-key.pem
+plugins.security.ssl.http.pemtrustedcas_filepath: certs/root-ca.pem
+
+# Admin cert DN — must match CN of admin.pem
+plugins.security.authcz.admin_dn:
+  - "CN=admin,OU=Wazuh,O=Wazuh,L=California,C=US"
+
+# Node cert DN — must match CN of indexer.pem
+plugins.security.nodes_dn:
+  - "CN=demo.indexer,OU=Wazuh,O=Wazuh,L=California,C=US"
+
+plugins.security.audit.type: internal_opensearch
+plugins.security.enable_snapshot_restore_privilege: true
+plugins.security.check_snapshot_restore_write_privileges: true
+plugins.security.restapi.roles_enabled:
+  - "all_access"
+  - "security_rest_api_access"
+
+# Elasticsearch compatibility mode — allows Filebeat 7.x _type field
+compatibility.override_main_response_version: true

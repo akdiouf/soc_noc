@@ -26,6 +26,7 @@
           - curl
           - gnupg
           - lsb-release
+          - rsync
         state: present
       when: ansible_os_family == "Debian"
 
@@ -87,6 +88,9 @@
           - "--exclude=*.pyc"
           - "--exclude=node_modules"
           - "--exclude=.env.example"
+          - "--exclude=docker/thehive/data/db"
+          - "--exclude=docker/thehive/data/index"
+          - "--exclude=docker/thehive/data/files"
 
     - name: Vérifier la présence du fichier .env dans docker/
       stat:
@@ -105,13 +109,32 @@
       file:
         path: "{{ compose_dir }}/thehive/data/{{ item }}"
         state: directory
-        mode: '0777'
-        owner: root
-        group: root
+        mode: '0755'
+        owner: 1000
+        group: 1000
       loop:
         - db
         - index
         - files
+
+    - name: Créer les répertoires de données Wazuh
+      file:
+        path: "{{ compose_dir }}/wazuh/{{ item }}"
+        state: directory
+        mode: '0755'
+      loop:
+        - certs
+        - config
+        - data
+
+    # ─── vm.max_map_count requis par OpenSearch / Elasticsearch ──────────────
+    - name: Augmenter vm.max_map_count
+      sysctl:
+        name: vm.max_map_count
+        value: '262144'
+        sysctl_set: true
+        state: present
+        reload: true
 
     # ─── Déploiement Docker Compose ───────────────────────────────────────────
     - name: Arrêter les anciens conteneurs
@@ -119,6 +142,23 @@
         project_src: "{{ compose_dir }}"
         state: absent
       ignore_errors: true
+
+    - name: Supprimer le volume postgres (réinitialisation du mot de passe)
+      community.docker.docker_volume:
+        name: docker_postgres_data
+        state: absent
+      ignore_errors: true
+
+    - name: Vider l'index Lucene TheHive (migration vers Elasticsearch)
+      file:
+        path: "{{ compose_dir }}/thehive/data/index"
+        state: "{{ item }}"
+        mode: '0777'
+        owner: root
+        group: root
+      loop:
+        - absent
+        - directory
 
     - name: Construire et démarrer la plateforme
       community.docker.docker_compose_v2:
@@ -336,8 +376,8 @@
               # ── Kibana ─────────────────────────────────────────────────────
               location /kibana/ {
                   proxy_pass         http://127.0.0.1:5601/kibana/;
-                  proxy_set_header   Host       $host;
-                  proxy_set_header   X-Real-IP  $remote_addr;
+                  proxy_set_header   Host              $host;
+                  proxy_set_header   X-Real-IP         $remote_addr;
                   proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
                   proxy_set_header   X-Forwarded-Proto $scheme;
                   proxy_set_header   X-Forwarded-Host  $host;
@@ -346,8 +386,8 @@
               # ── Wazuh Dashboard ────────────────────────────────────────────
               location /wazuh/ {
                   proxy_pass         http://127.0.0.1:5602/wazuh/;
-                  proxy_set_header   Host       $host;
-                  proxy_set_header   X-Real-IP  $remote_addr;
+                  proxy_set_header   Host              $host;
+                  proxy_set_header   X-Real-IP         $remote_addr;
                   proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
                   proxy_set_header   X-Forwarded-Proto $scheme;
                   proxy_set_header   X-Forwarded-Host  $host;
@@ -379,33 +419,52 @@
 
               # ── TheHive ────────────────────────────────────────────────────
               location /thehive/ {
-                  proxy_pass         http://127.0.0.1:9000/thehive/;
+                  proxy_pass         http://127.0.0.1:9070/thehive/;
+                  proxy_http_version 1.1;
+                  proxy_set_header   Connection "";
                   proxy_set_header   Host       $host;
                   proxy_set_header   X-Real-IP  $remote_addr;
                   proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
                   proxy_set_header   X-Forwarded-Proto $scheme;
+                  proxy_read_timeout 300s;
+                  proxy_send_timeout 300s;
               }
 
               # TheHive SPA : paths d'assets hardcodés sans préfixe dans index.html
               location /static/ {
-                  proxy_pass         http://127.0.0.1:9000/static/;
+                  proxy_pass         http://127.0.0.1:9070/static/;
                   proxy_set_header   Host       $host;
                   proxy_set_header   X-Forwarded-Proto $scheme;
               }
 
               location = /manifest.json {
-                  proxy_pass         http://127.0.0.1:9000/manifest.json;
+                  proxy_pass         http://127.0.0.1:9070/manifest.json;
                   proxy_set_header   Host       $host;
                   proxy_set_header   X-Forwarded-Proto $scheme;
               }
 
               # ── Cortex ─────────────────────────────────────────────────────
               location /cortex/ {
-                  proxy_pass         http://127.0.0.1:9001/cortex/;
+                  proxy_pass         http://127.0.0.1:9071/cortex/;
+                  proxy_http_version 1.1;
+                  proxy_set_header   Connection "";
                   proxy_set_header   Host       $host;
                   proxy_set_header   X-Real-IP  $remote_addr;
                   proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
                   proxy_set_header   X-Forwarded-Proto $scheme;
+                  proxy_read_timeout 300s;
+              }
+
+              # ── MISP ───────────────────────────────────────────────────────
+              location /misp/ {
+                  proxy_pass         http://127.0.0.1:8081/;
+                  proxy_set_header   Host              akisoc.team.akilee.tech;
+                  proxy_set_header   X-Real-IP         $remote_addr;
+                  proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+                  proxy_set_header   X-Forwarded-Proto https;
+                  proxy_redirect     http://127.0.0.1:8081/ https://akisoc.team.akilee.tech/misp/;
+                  proxy_read_timeout 120s;
+                  client_max_body_size 50m;
               }
 
               # ── Shuffle SOAR (frontend UI) ─────────────────────────────────
@@ -460,6 +519,9 @@
         - { port: '514',  proto: udp, comment: 'Syslog' }
         - { port: '2055', proto: udp, comment: 'NetFlow' }
         - { port: '161',  proto: udp, comment: 'SNMP' }
+        - { port: '1514', proto: udp, comment: 'Wazuh Agent Events' }
+        - { port: '1515', proto: tcp, comment: 'Wazuh Agent Registration' }
+        - { port: '55000', proto: tcp, comment: 'Wazuh API' }
       when: ansible_os_family == "Debian"
 
   handlers:

@@ -115,7 +115,7 @@ export function ThreatIntelPage() {
             </div>
           )}
           <a
-            href="http://localhost:8081"
+            href="https://akisoc.team.akilee.tech/misp/"
             target="_blank"
             rel="noopener noreferrer"
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium bg-purple-50 text-purple-700 hover:bg-purple-100"

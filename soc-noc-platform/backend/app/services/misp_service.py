@@ -61,12 +61,12 @@ class MISPService:
             }
         try:
             misp = self._get_client()
-            # version() is a lightweight call
-            info = await self._run(misp.get_version)
+            # misp_instance_version is populated at init, no extra HTTP call needed
+            info = misp.misp_instance_version
             return {
                 "connected": True,
                 "url": settings.MISP_URL,
-                "version": info.get("version"),
+                "version": info.get("version") if isinstance(info, dict) else None,
                 "organization": settings.MISP_ORG,
             }
         except Exception as exc:

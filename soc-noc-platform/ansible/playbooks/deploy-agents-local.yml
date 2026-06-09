@@ -31,7 +31,9 @@
     noc_backend_ip: "{{ hostvars['localhost']['ansible_default_ipv4']['address'] | default('') }}"
     noc_api_url: "http://{{ noc_backend_ip }}:8000"
     noc_api_user: "admin"
-    noc_api_password: "ChangeMe123!"
+    noc_api_password: "f5dAm8I2856Nup3"
+    # Valeur pour l'API (enum : primary, failover, both)
+    device_site: "primary"
 
   pre_tasks:
     - name: Vérifier que noc_backend_ip est défini et non vide
@@ -276,8 +278,8 @@
           hostname: "{{ ansible_hostname }}"
           ip_address: "{{ ansible_host }}"
           device_type: "server"
-          site: "{{ site | default('local') }}"
-          monitoring_protocol: "snmp_v2c"
+          site: "{{ device_site }}"
+          monitoring_protocol: "icmp"
           poll_interval: 60
           is_monitored: true
           is_critical: false

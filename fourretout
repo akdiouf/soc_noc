@@ -174,3 +174,21 @@ To start the stack locally:
   celery-beat
   7. La première synchronisation se lancera automatiquement (ou manuellement
   depuis la page Threat Intel)
+
+
+  #### Test LAN
+   ansible-playbook -i inventory/hosts-local.yml playbooks/deploy-agents-local.yml   -e noc_backend_ip=192.168.100.17  --ask-become-pass
+
+   ansible-playbook -i inventory/hosts-local.yml playbooks/deploy-agents-local.yml -e noc_backend_ip=192.168.100.17 --tags register --ask-become-pass
+
+
+   #### EN PROD
+  
+  # Plateforme
+  ansible-playbook -K -i inventory/hosts.yml playbooks/deploy-platform.yml -e "ansible_port=1243"
+
+  ### Attendre que les conteneurs soient UP (2-3 minutes), puis vérifier :
+  ### curl -s  http://213.199.42.187:8090/api/v1/health
+
+  # Agents (après que la plateforme est up)
+  ansible-playbook -K -i inventory/hosts.yml playbooks/deploy-agents.yml -e "ansible_port=1243"  

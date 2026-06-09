@@ -368,3 +368,7 @@ async def _ping_device(device: Device, alert_svc: AlertService, db):
     else:
         if device.status == DeviceStatus.DOWN:
             await alert_svc.auto_resolve(device.id, "reachability", AlertCategory.AVAILABILITY)
+        if device.status in (DeviceStatus.DOWN, DeviceStatus.UNKNOWN):
+            device.status = DeviceStatus.UP
+            device.last_poll = __import__("datetime").datetime.utcnow()
+            await db.flush()

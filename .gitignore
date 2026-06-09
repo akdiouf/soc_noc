@@ -2,6 +2,7 @@
 .vscode/
 soc-noc-platform/secrets/
 soc-noc-platform/.env
+soc-noc-platform/CREDENTIALS.md
 # TheHive runtime data (bind mount)
 soc-noc-platform/docker/thehive/data/db/*
 soc-noc-platform/docker/thehive/data/index/*

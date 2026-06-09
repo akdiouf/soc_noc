@@ -51,28 +51,28 @@ const PLATFORM_GROUPS = [
     group: "Supervision",
     color: "text-blue-400",
     tools: [
-      { label: "Grafana", href: "http://localhost:8090/grafana/", icon: BarChart2, desc: "Dashboards" },
-      { label: "Prometheus", href: "http://localhost:8090/prometheus/", icon: Radio, desc: "Métriques" },
-      { label: "Alertmanager", href: "http://localhost:8090/alerts/", icon: Bell, desc: "Alertes" },
-      { label: "Kibana", href: "http://localhost:8090/kibana", icon: Search, desc: "Logs ELK" },
+      { label: "Grafana", href: "https://akisoc.team.akilee.tech/grafana/", icon: BarChart2, desc: "Dashboards" },
+      { label: "Prometheus", href: "https://akisoc.team.akilee.tech/prometheus/", icon: Radio, desc: "Métriques" },
+      { label: "Alertmanager", href: "https://akisoc.team.akilee.tech/alerts/", icon: Bell, desc: "Alertes" },
+      { label: "Kibana", href: "https://akisoc.team.akilee.tech/kibana", icon: Search, desc: "Logs ELK" },
     ],
   },
   {
     group: "SOC",
     color: "text-red-400",
     tools: [
-      { label: "Wazuh", href: "http://localhost:8090/wazuh", icon: ShieldAlert, desc: "SIEM / EDR" },
-      { label: "TheHive", href: "http://localhost:8090/thehive", icon: BookOpen, desc: "Incidents IR" },
-      { label: "Cortex", href: "http://localhost:8090/cortex", icon: Layers, desc: "Enrichissement" },
-      { label: "MISP", href: "http://localhost:8081", icon: Shield, desc: "Threat Intel" },
-      { label: "Shuffle", href: "http://localhost:3002", icon: GitBranch, desc: "SOAR" },
+      { label: "Wazuh", href: "https://akisoc.team.akilee.tech/wazuh", icon: ShieldAlert, desc: "SIEM / EDR" },
+      { label: "TheHive", href: "https://akisoc.team.akilee.tech/thehive", icon: BookOpen, desc: "Incidents IR" },
+      { label: "Cortex", href: "https://akisoc.team.akilee.tech/cortex", icon: Layers, desc: "Enrichissement" },
+      { label: "MISP", href: "https://akisoc.team.akilee.tech/misp/", icon: Shield, desc: "Threat Intel" },
+      { label: "Shuffle", href: "https://akisoc.team.akilee.tech/shuffle/", icon: GitBranch, desc: "SOAR" },
     ],
   },
   {
     group: "Infrastructure",
     color: "text-green-400",
     tools: [
-      { label: "NetBox", href: "http://localhost:8090/netbox", icon: Database, desc: "CMDB" },
+      { label: "NetBox", href: "https://akisoc.team.akilee.tech/netbox", icon: Database, desc: "CMDB" },
     ],
   },
 ];
