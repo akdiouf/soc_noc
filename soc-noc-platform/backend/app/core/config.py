@@ -99,7 +99,7 @@ class Settings(BaseSettings):
     PAGERDUTY_SERVICE_KEY: Optional[str] = None
 
     # TheHive
-    THEHIVE_URL: str = "http://localhost:9000"
+    THEHIVE_URL: str = "http://thehive:9000"
     THEHIVE_API_KEY: str = ""
 
     # Wazuh
