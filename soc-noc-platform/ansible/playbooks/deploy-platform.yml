@@ -143,22 +143,46 @@
         state: absent
       ignore_errors: true
 
-    - name: Supprimer le volume postgres (réinitialisation du mot de passe)
+    # Laisser le temps au kernel de libérer les ports (1514, 1515, 55000…)
+    - name: Attendre la libération des ports réseau (5s)
+      pause:
+        seconds: 5
+
+    # ⚠️  Opérations destructives — désactivées par défaut.
+    # Pour réinitialiser la BDD : ansible-playbook ... -e "reset_db=true"
+    # Pour réinitialiser l'index TheHive : ansible-playbook ... -e "reset_thehive=true"
+    - name: Supprimer le volume postgres (réinitialisation forcée)
       community.docker.docker_volume:
         name: docker_postgres_data
         state: absent
+      when: reset_db | default(false) | bool
       ignore_errors: true
 
-    - name: Vider l'index Lucene TheHive (migration vers Elasticsearch)
+    # reset_thehive=true : vide BerkeleyDB + index Lucene pour permettre un
+    # démarrage propre de JanusGraph (recrée thehive_global dans elasticsearch-cortex)
+    - name: Vider la base JanusGraph/BerkeleyDB TheHive (réinitialisation forcée)
       file:
-        path: "{{ compose_dir }}/thehive/data/index"
+        path: "{{ compose_dir }}/thehive/data/db"
         state: "{{ item }}"
-        mode: '0777'
-        owner: root
-        group: root
+        mode: '0755'
+        owner: 1000
+        group: 1000
       loop:
         - absent
         - directory
+      when: reset_thehive | default(false) | bool
+
+    - name: Vider l'index Lucene TheHive (réinitialisation forcée)
+      file:
+        path: "{{ compose_dir }}/thehive/data/index"
+        state: "{{ item }}"
+        mode: '0755'
+        owner: 1000
+        group: 1000
+      loop:
+        - absent
+        - directory
+      when: reset_thehive | default(false) | bool
 
     - name: Construire et démarrer la plateforme
       community.docker.docker_compose_v2:
@@ -409,6 +433,9 @@
               }
 
               # ── NetBox ─────────────────────────────────────────────────────
+              # NGINX Unit dans le container sert /netbox/static/* directement
+              # (BASE_PATH=netbox → STATIC_URL=/netbox/static/).
+              # Une seule location /netbox/ couvre app + static.
               location /netbox/ {
                   proxy_pass         http://127.0.0.1:8080/netbox/;
                   proxy_set_header   Host       $host;
@@ -437,8 +464,9 @@
                   proxy_set_header   X-Forwarded-Proto $scheme;
               }
 
+              # manifest.json → Shuffle (TheHive ne le sert pas depuis la racine)
               location = /manifest.json {
-                  proxy_pass         http://127.0.0.1:9070/manifest.json;
+                  proxy_pass         http://127.0.0.1:3002/manifest.json;
                   proxy_set_header   Host       $host;
                   proxy_set_header   X-Forwarded-Proto $scheme;
               }
@@ -485,6 +513,28 @@
                   proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
                   proxy_set_header   X-Forwarded-Proto $scheme;
               }
+
+              # ── Assets Vite (frontend principal ET Shuffle partagent /assets/) ──
+              # Cascade : essayer le frontend principal (3001) en premier ;
+              # si 404, fallback vers Shuffle (3002).
+              location /assets/ {
+                  proxy_pass             http://127.0.0.1:3001;
+                  proxy_intercept_errors on;
+                  error_page 404         = @shuffle_assets;
+                  proxy_set_header   Host       $host;
+                  proxy_set_header   X-Real-IP  $remote_addr;
+                  proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+                  proxy_set_header   X-Forwarded-Proto $scheme;
+              }
+
+              location @shuffle_assets {
+                  internal;
+                  proxy_pass         http://127.0.0.1:3002;
+                  proxy_set_header   Host       $host;
+                  proxy_set_header   X-Real-IP  $remote_addr;
+                  proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+                  proxy_set_header   X-Forwarded-Proto $scheme;
+              }
           }
       when: letsencrypt_cert.stat.exists
       notify: reload nginx
@@ -519,10 +569,97 @@
         - { port: '514',  proto: udp, comment: 'Syslog' }
         - { port: '2055', proto: udp, comment: 'NetFlow' }
         - { port: '161',  proto: udp, comment: 'SNMP' }
-        - { port: '1514', proto: udp, comment: 'Wazuh Agent Events' }
+        - { port: '1514', proto: tcp, comment: 'Wazuh Agent Events TCP' }
+        - { port: '1514', proto: udp, comment: 'Wazuh Agent Events UDP' }
         - { port: '1515', proto: tcp, comment: 'Wazuh Agent Registration' }
         - { port: '55000', proto: tcp, comment: 'Wazuh API' }
       when: ansible_os_family == "Debian"
+
+    # ─── Post-déploiement Wazuh ───────────────────────────────────────────────
+    - name: "Wazuh — attendre que l'indexer soit healthy (max 6 min)"
+      community.docker.docker_container_info:
+        name: soc_wazuh_indexer
+      register: wazuh_indexer_info
+      until: wazuh_indexer_info.container.State.Health.Status == "healthy"
+      retries: 24
+      delay: 15
+      tags: [wazuh]
+
+    # Génère le hash bcrypt pour INDEXER_PASSWORD et l'injecte dans internal_users.yml
+    # avant d'appliquer securityadmin — garantit la cohérence mot de passe / hash.
+    - name: "Wazuh — générer le hash bcrypt pour INDEXER_PASSWORD"
+      shell: |
+        PASS='{{ wazuh_indexer_password | default("WazuhAdmin123!") }}'
+        docker exec soc_wazuh_indexer bash -c \
+          "export JAVA_HOME=/usr/share/wazuh-indexer/jdk && \
+           chmod +x /usr/share/wazuh-indexer/plugins/opensearch-security/tools/hash.sh && \
+           /usr/share/wazuh-indexer/plugins/opensearch-security/tools/hash.sh -p '${PASS}'" \
+          2>/dev/null | tail -1
+      register: indexer_hash_result
+      changed_when: false
+      tags: [wazuh]
+
+    - name: "Wazuh — injecter le hash admin dans internal_users.yml"
+      shell: |
+        HASH="{{ indexer_hash_result.stdout | trim }}"
+        sed -i '/^admin:/{n;s|  hash:.*|  hash: "'"${HASH}"'"|}' \
+          "{{ compose_dir }}/wazuh/opensearch-security/internal_users.yml"
+      when: indexer_hash_result.stdout | trim | length > 0
+      changed_when: true
+      tags: [wazuh]
+
+    - name: "Wazuh — appliquer la config de sécurité OpenSearch (securityadmin)"
+      shell: |
+        docker exec soc_wazuh_indexer bash -c \
+          'chmod +x /usr/share/wazuh-indexer/plugins/opensearch-security/tools/securityadmin.sh &&
+           export JAVA_HOME=/usr/share/wazuh-indexer/jdk &&
+           /usr/share/wazuh-indexer/plugins/opensearch-security/tools/securityadmin.sh \
+             -cd /usr/share/wazuh-indexer/opensearch-security/ \
+             -icl -nhnv \
+             -cacert /usr/share/wazuh-indexer/certs/root-ca.pem \
+             -cert /usr/share/wazuh-indexer/certs/admin.pem \
+             -key /usr/share/wazuh-indexer/certs/admin-key.pem \
+             -p 9200'
+      register: securityadmin_result
+      retries: 3
+      delay: 20
+      until: securityadmin_result.rc == 0
+      tags: [wazuh]
+
+    - name: "Wazuh — attendre que l'API manager soit disponible (max 5 min)"
+      uri:
+        url: "https://127.0.0.1:55000/"
+        validate_certs: false
+        status_code: [200, 401, 403]
+      register: wazuh_api_ready
+      retries: 20
+      delay: 15
+      until: wazuh_api_ready.status in [200, 401, 403]
+      ignore_errors: true
+      tags: [wazuh]
+
+    # Définit le mot de passe wazuh-wui via docker exec (idempotent) :
+    # déploiement initial → "wazuh-wui" (défaut) ; redéploiement → mot de passe cible déjà en place.
+    - name: "Wazuh — initialiser le mot de passe wazuh-wui (docker exec)"
+      vars:
+        _wazuh_pass: "{{ wazuh_api_password | default('MyS3cr37P450r.*-') }}"
+      shell: |
+        docker exec soc_wazuh_manager bash -c '
+          TOKEN=$(curl -s -k -u wazuh-wui:wazuh-wui \
+            -X POST "https://localhost:55000/security/user/authenticate?raw=true");
+          if [ -z "$TOKEN" ]; then
+            TOKEN=$(curl -s -k -u "wazuh-wui:{{ _wazuh_pass }}" \
+              -X POST "https://localhost:55000/security/user/authenticate?raw=true");
+          fi;
+          if [ -n "$TOKEN" ]; then
+            curl -s -k -X PUT "https://localhost:55000/security/users/2" \
+              -H "Authorization: Bearer $TOKEN" \
+              -H "Content-Type: application/json" \
+              -d "{\"password\":\"{{ _wazuh_pass }}\"}";
+          fi'
+      register: wazuh_pass_result
+      changed_when: "'affected_items' in wazuh_pass_result.stdout"
+      tags: [wazuh]
 
   handlers:
     - name: reload nginx
