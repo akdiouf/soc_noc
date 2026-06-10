@@ -201,36 +201,52 @@
         - soc_grafana
       failed_when: not container_info.container.State.Running
 
-    - name: "Backend — migration site enum → varchar (idempotent)"
-      shell: |
-        docker exec -i soc_backend python3 - << 'PYEOF'
-        import asyncio, os
-        from sqlalchemy.ext.asyncio import create_async_engine
-        from sqlalchemy import text
-        async def migrate():
-            engine = create_async_engine(os.environ['DATABASE_URL'])
-            async with engine.begin() as conn:
-                r = await conn.execute(text(
-                    "SELECT data_type FROM information_schema.columns"
-                    " WHERE table_name='devices' AND column_name='site'"
-                ))
-                row = r.fetchone()
-                if row and 'char' not in row[0].lower():
-                    await conn.execute(text(
-                        'ALTER TABLE devices ALTER COLUMN site'
-                        ' TYPE VARCHAR(64) USING site::text'
-                    ))
-                    await conn.execute(text('DROP TYPE IF EXISTS devicesiteenum'))
-                    await conn.execute(text('DROP TYPE IF EXISTS devicesit'))
-                    print('MIGRATED')
-                else:
-                    print('ALREADY_DONE')
-            await engine.dispose()
-        asyncio.run(migrate())
-        PYEOF
+    - name: "Backend — écrire le script de migration sur l'hôte"
+      copy:
+        dest: /tmp/migrate_site.py
+        content: |
+          import asyncio, os
+          from sqlalchemy.ext.asyncio import create_async_engine
+          from sqlalchemy import text
+
+          async def migrate():
+              engine = create_async_engine(os.environ['DATABASE_URL'])
+              async with engine.begin() as conn:
+                  r = await conn.execute(text(
+                      "SELECT data_type FROM information_schema.columns"
+                      " WHERE table_name='devices' AND column_name='site'"
+                  ))
+                  row = r.fetchone()
+                  if row and 'char' not in row[0].lower():
+                      await conn.execute(text(
+                          'ALTER TABLE devices ALTER COLUMN site'
+                          ' TYPE VARCHAR(64) USING site::text'
+                      ))
+                      await conn.execute(text('DROP TYPE IF EXISTS devicesiteenum'))
+                      await conn.execute(text('DROP TYPE IF EXISTS devicesit'))
+                      print('MIGRATED')
+                  else:
+                      print('ALREADY_DONE')
+              await engine.dispose()
+
+          asyncio.run(migrate())
+      tags: [backend, migration]
+
+    - name: "Backend — copier le script dans le conteneur"
+      shell: docker cp /tmp/migrate_site.py soc_backend:/tmp/migrate_site.py
+      tags: [backend, migration]
+
+    - name: "Backend — exécuter la migration site enum → varchar"
+      shell: docker exec soc_backend python3 /tmp/migrate_site.py
       register: site_migration
       changed_when: "'MIGRATED' in site_migration.stdout"
       failed_when: site_migration.rc != 0
+      tags: [backend, migration]
+
+    - name: "Backend — supprimer le script de migration"
+      file:
+        path: /tmp/migrate_site.py
+        state: absent
       tags: [backend, migration]
 
     # ─── Nginx hôte + Let's Encrypt ──────────────────────────────────────────
