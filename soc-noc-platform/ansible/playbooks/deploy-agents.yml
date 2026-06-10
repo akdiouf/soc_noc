@@ -18,9 +18,9 @@
       {{ hostvars[groups['noc_platform'][0]]['ansible_host']
          if 'noc_platform' in groups and groups['noc_platform'] | length > 0
          else '' }}
-    noc_api_url: "http://{{ noc_backend_ip }}:8090"
+    noc_api_url: "http://{{ noc_backend_ip }}:8000"
     noc_api_user: "admin"
-    noc_api_password: "f5dAm8I2856Nup3"
+    noc_api_password: "{{ vault_noc_api_password | default('f5dAm8I2856Nup3') }}"
     device_site: "{{ site | default('primary') }}"
 
   pre_tasks:
@@ -302,7 +302,7 @@
 
   tasks:
     - name: Activer SNMP v3 sur Cisco
-      ios_config:
+      cisco.ios.ios_config:
         lines:
           - "snmp-server group NOC_GROUP v3 priv"
           - "snmp-server user noc_monitor NOC_GROUP v3 auth sha {{ snmp_auth_password }} priv aes 128 {{ snmp_priv_password }}"
@@ -311,7 +311,7 @@
         save_when: modified
 
     - name: Activer NetFlow v5
-      ios_config:
+      cisco.ios.ios_config:
         lines:
           - "ip flow-export version 5"
           - "ip flow-export destination {{ noc_backend_ip }} 2055"
@@ -320,7 +320,7 @@
         save_when: modified
 
     - name: Activer Syslog
-      ios_config:
+      cisco.ios.ios_config:
         lines:
           - "logging host {{ noc_backend_ip }} transport udp port 514"
           - "logging trap informational"

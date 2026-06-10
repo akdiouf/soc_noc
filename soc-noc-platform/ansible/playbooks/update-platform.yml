@@ -1,0 +1,213 @@
+---
+# Mise à jour ciblée — ne redémarre que les services modifiés
+# Usage: ansible-playbook -i inventory/hosts.yml playbooks/update-platform.yml
+#
+# Tags disponibles :
+#   --tags wazuh          → resync config + restart wazuh-indexer/dashboard uniquement
+#   --tags backend        → rebuild + restart celery-worker/beat/backend uniquement
+#   --tags cortex         → resync config + restart cortex uniquement
+#   --tags reset-thehive  → supprime BerkeleyDB + redémarre TheHive (résout index_not_found)
+#   --tags nginx          → resync + reload nginx hôte uniquement (sans toucher aux conteneurs)
+#   --tags all            → tous les services (défaut)
+
+- name: Mise à jour ciblée de la plateforme NOC/SOC
+  hosts: noc_platform
+  become: true
+
+  vars:
+    platform_dir: /opt/soc-noc-platform
+    compose_dir: "{{ platform_dir }}/docker"
+
+  tasks:
+    # ─── Synchronisation des fichiers modifiés ────────────────────────────────
+    - name: Synchroniser les fichiers de la plateforme (sans node_modules ni data)
+      synchronize:
+        src: "{{ playbook_dir }}/../../"
+        dest: "{{ platform_dir }}/"
+        delete: false
+        recursive: true
+        rsync_opts:
+          - "--exclude=.git"
+          - "--exclude=__pycache__"
+          - "--exclude=*.pyc"
+          - "--exclude=node_modules"
+          - "--exclude=.env.example"
+          - "--exclude=docker/thehive/data/db"
+          - "--exclude=docker/thehive/data/index"
+          - "--exclude=docker/thehive/data/files"
+      tags: [wazuh, backend]
+
+    # ─── WAZUH : redémarrage indexer + dashboard ──────────────────────────────
+    - name: "Wazuh — arrêter le dashboard (dépend de l'indexer)"
+      community.docker.docker_container:
+        name: soc_wazuh_dashboard
+        state: stopped
+      tags: wazuh
+
+    - name: "Wazuh — recréer l'indexer avec la nouvelle config (healthcheck)"
+      community.docker.docker_compose_v2:
+        project_src: "{{ compose_dir }}"
+        services:
+          - wazuh-indexer
+        state: present
+        recreate: always
+      tags: wazuh
+
+    - name: "Wazuh — attendre que l'indexer soit healthy (max 6 min)"
+      community.docker.docker_container_info:
+        name: soc_wazuh_indexer
+      register: wazuh_indexer_info
+      until: wazuh_indexer_info.container.State.Health.Status == "healthy"
+      retries: 24
+      delay: 15
+      tags: wazuh
+
+    - name: "Wazuh — redémarrer le manager"
+      community.docker.docker_compose_v2:
+        project_src: "{{ compose_dir }}"
+        services:
+          - wazuh-manager
+        state: present
+        recreate: always
+      tags: wazuh
+
+    - name: "Wazuh — redémarrer le dashboard"
+      community.docker.docker_compose_v2:
+        project_src: "{{ compose_dir }}"
+        services:
+          - wazuh-dashboard
+        state: present
+        recreate: always
+      tags: wazuh
+
+    - name: "Wazuh — vérifier que le dashboard tourne"
+      community.docker.docker_container_info:
+        name: soc_wazuh_dashboard
+      register: dashboard_info
+      failed_when: not dashboard_info.container.State.Running
+      tags: wazuh
+
+    # ─── THEHIVE : reset BerkeleyDB (résout index_not_found sur thehive_global) ─
+    # Cas d'usage : BerkeleyDB survivant après que cortex_es_data a été vidé.
+    # JanusGraph voit l'ancien schéma → cherche l'index ES → 404 → crash.
+    # Solution : repartir de zéro sur BerkeleyDB, JanusGraph recrée tout.
+    - name: "TheHive reset — arrêter le conteneur"
+      community.docker.docker_compose_v2:
+        project_src: "{{ compose_dir }}"
+        services:
+          - thehive
+        state: absent
+      tags: reset-thehive
+
+    - name: "TheHive reset — supprimer BerkeleyDB (JanusGraph recrée thehive_global)"
+      file:
+        path: "{{ compose_dir }}/thehive/data/db"
+        state: "{{ item }}"
+        mode: '0755'
+        owner: 1000
+        group: 1000
+      loop:
+        - absent
+        - directory
+      tags: reset-thehive
+
+    - name: "TheHive reset — supprimer l'index Lucene local"
+      file:
+        path: "{{ compose_dir }}/thehive/data/index"
+        state: "{{ item }}"
+        mode: '0755'
+        owner: 1000
+        group: 1000
+      loop:
+        - absent
+        - directory
+      tags: reset-thehive
+
+    - name: "TheHive reset — redémarrer TheHive"
+      community.docker.docker_compose_v2:
+        project_src: "{{ compose_dir }}"
+        services:
+          - thehive
+        state: present
+        recreate: always
+      tags: reset-thehive
+
+    - name: "TheHive reset — vérifier que le conteneur tourne"
+      community.docker.docker_container_info:
+        name: soc_thehive
+      register: thehive_info
+      failed_when: not thehive_info.container.State.Running
+      tags: reset-thehive
+
+    # ─── CORTEX : redémarrer après changement de config ──────────────────────
+    - name: "Cortex — redémarrer avec la nouvelle config (application.conf)"
+      community.docker.docker_compose_v2:
+        project_src: "{{ compose_dir }}"
+        services:
+          - cortex
+        state: present
+        recreate: always
+      tags: cortex
+
+    - name: "Cortex — vérifier que le conteneur tourne"
+      community.docker.docker_container_info:
+        name: soc_cortex
+      register: cortex_info
+      failed_when: not cortex_info.container.State.Running
+      tags: cortex
+
+    # ─── BACKEND : rebuild + restart celery (fix polling status) ─────────────
+    - name: "Backend — rebuild et redémarrer celery-worker"
+      community.docker.docker_compose_v2:
+        project_src: "{{ compose_dir }}"
+        services:
+          - celery-worker
+        state: present
+        recreate: always
+        build: always
+      tags: backend
+
+    - name: "Backend — rebuild et redémarrer celery-beat"
+      community.docker.docker_compose_v2:
+        project_src: "{{ compose_dir }}"
+        services:
+          - celery-beat
+        state: present
+        recreate: always
+        build: always
+      tags: backend
+
+    - name: "Backend — rebuild et redémarrer l'API"
+      community.docker.docker_compose_v2:
+        project_src: "{{ compose_dir }}"
+        services:
+          - backend
+        state: present
+        recreate: always
+        build: always
+      tags: backend
+
+    - name: "Backend — vérifier que les services tournent"
+      community.docker.docker_container_info:
+        name: "{{ item }}"
+      register: backend_info
+      failed_when: not backend_info.container.State.Running
+      loop:
+        - soc_backend
+        - soc_celery_worker
+        - soc_celery_beat
+      tags: backend
+
+    # ─── NGINX : reload uniquement (vhost mis à jour via deploy-platform.yml) ──
+    # Pour mettre à jour le vhost nginx, relancer deploy-platform.yml qui
+    # contient le contenu complet du vhost. Ce tag recharge juste nginx.
+    - name: "Nginx — tester la configuration"
+      command: nginx -t
+      changed_when: false
+      tags: nginx
+
+    - name: "Nginx — recharger"
+      systemd:
+        name: nginx
+        state: reloaded
+      tags: nginx

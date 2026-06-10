@@ -1,0 +1,10 @@
+---
+# Variables partagées par tous les hôtes
+# Chiffrer ce fichier avec : ansible-vault encrypt inventory/group_vars/all.yml
+
+# ── API plateforme NOC/SOC ────────────────────────────────────────────────────
+vault_noc_api_password: "f5dAm8I2856Nup3"
+
+# ── SNMP v3 (équipements Cisco — utilisé quand les hosts sont décommentés) ───
+vault_snmp_auth_password: "changeme_snmp_auth"
+vault_snmp_priv_password: "changeme_snmp_priv"

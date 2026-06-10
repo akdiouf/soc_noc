@@ -192,3 +192,23 @@ To start the stack locally:
 
   # Agents (après que la plateforme est up)
   ansible-playbook -K -i inventory/hosts.yml playbooks/deploy-agents.yml -e "ansible_port=1243"  
+
+  # Appliquer les deux corrections en une passe
+  ansible-playbook -K -i inventory/hosts.yml  playbooks/update-platform.yml -e "ansible_port=1243"
+
+
+  #### Erreur Wazuh
+  docker exec soc_wazuh_indexer bash -c "chmod +x /usr/share/wazuh-indexer/plugins/opensearch-security/tools/securityadmin.sh"
+
+docker exec soc_wazuh_indexer bash -c "export JAVA_HOME=/usr/share/wazuh-indexer/jdk && /usr/share/wazuh-indexer/plugins/opensearch-security/tools/securityadmin.sh   -cd /usr/share/wazuh-indexer/opensearch-security/   -icl -nhnv   -cacert /usr/share/wazuh-indexer/certs/root-ca.pem   -cert /usr/share/wazuh-indexer/certs/admin.pem   -key /usr/share/wazuh-indexer/certs/admin-key.pem   -p 9200"
+
+### Change API password
+docker exec soc_wazuh_manager bash -c '
+TOKEN=$(curl -s -k -u wazuh-wui:wazuh-wui \
+-X POST "https://localhost:55000/security/user/authenticate?raw=true");
+curl -s -k -X PUT \
+"https://localhost:55000/security/users/2" \
+-H "Authorization: Bearer $TOKEN" \
+-H "Content-Type: application/json" \
+-d "{\"password\":\"MyS3cr37P450r.*-\"}"
+'

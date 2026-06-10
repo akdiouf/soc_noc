@@ -51,6 +51,7 @@ async def _poll_all_snmp_devices():
 
         tasks = [_poll_snmp_device(device, db) for device in devices]
         await asyncio.gather(*tasks, return_exceptions=True)
+        await db.commit()
         logger.info(f"SNMP polling completed for {len(devices)} devices")
 
 
@@ -142,8 +143,10 @@ async def _poll_snmp_device(device: Device, db):
 
     except Exception as e:
         logger.error(f"SNMP poll error for {device.name} ({device.ip_address}): {e}")
-        device.status = DeviceStatus.UNKNOWN
-        await db.flush()
+        # Don't downgrade a reachable device — only mark unknown if no ping confirmed it UP
+        if device.status != DeviceStatus.UP:
+            device.status = DeviceStatus.UNKNOWN
+            await db.flush()
 
 
 @shared_task(bind=True, max_retries=3, default_retry_delay=10)
@@ -169,6 +172,7 @@ async def _poll_all_modbus_devices():
         for device in devices:
             await _poll_modbus_device(device, db)
 
+        await db.commit()
         logger.info(f"Modbus polling completed for {len(devices)} devices")
 
 
@@ -238,7 +242,7 @@ async def _poll_modbus_device(device: Device, db):
                 metrics=metrics,
             )
             device.status = DeviceStatus.UP
-        else:
+        elif device.status != DeviceStatus.UP:
             device.status = DeviceStatus.UNKNOWN
 
         device.last_poll = __import__("datetime").datetime.utcnow()
@@ -246,8 +250,9 @@ async def _poll_modbus_device(device: Device, db):
 
     except Exception as e:
         logger.error(f"Modbus poll error for {device.name}: {e}")
-        device.status = DeviceStatus.UNKNOWN
-        await db.flush()
+        if device.status != DeviceStatus.UP:
+            device.status = DeviceStatus.UNKNOWN
+            await db.flush()
 
 
 @shared_task(bind=True, max_retries=3, default_retry_delay=10)
@@ -304,6 +309,8 @@ async def _poll_all_bacnet_devices():
             finally:
                 await collector.close()
 
+        await db.commit()
+
 
 @shared_task(bind=True, max_retries=2, default_retry_delay=5)
 def check_all_devices_reachability(self):
@@ -324,6 +331,7 @@ async def _check_all_devices_reachability():
         alert_svc = AlertService(db)
         tasks = [_ping_device(device, alert_svc, db) for device in devices]
         await asyncio.gather(*tasks, return_exceptions=True)
+        await db.commit()
 
 
 async def _ping_device(device: Device, alert_svc: AlertService, db):
@@ -370,5 +378,5 @@ async def _ping_device(device: Device, alert_svc: AlertService, db):
             await alert_svc.auto_resolve(device.id, "reachability", AlertCategory.AVAILABILITY)
         if device.status in (DeviceStatus.DOWN, DeviceStatus.UNKNOWN):
             device.status = DeviceStatus.UP
-            device.last_poll = __import__("datetime").datetime.utcnow()
-            await db.flush()
+        device.last_poll = __import__("datetime").datetime.utcnow()
+        await db.flush()
