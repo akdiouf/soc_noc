@@ -203,31 +203,31 @@
 
     - name: "Backend — migration site enum → varchar (idempotent)"
       shell: |
-        docker exec soc_backend python -c "
-import asyncio, os
-from sqlalchemy.ext.asyncio import create_async_engine
-from sqlalchemy import text
-
-async def migrate():
-    engine = create_async_engine(os.environ['DATABASE_URL'])
-    async with engine.begin() as conn:
-        result = await conn.execute(text(
-            \"SELECT data_type FROM information_schema.columns \"
-            \"WHERE table_name='devices' AND column_name='site'\"
-        ))
-        row = result.fetchone()
-        if row and 'char' not in row[0].lower():
-            await conn.execute(text(
-                'ALTER TABLE devices ALTER COLUMN site TYPE VARCHAR(64) USING site::text'
-            ))
-            await conn.execute(text('DROP TYPE IF EXISTS devicesiteenum'))
-            await conn.execute(text('DROP TYPE IF EXISTS devicesit'))
-            print('MIGRATED')
-        else:
-            print('ALREADY_DONE')
-
-asyncio.run(migrate())
-"
+        docker exec -i soc_backend python3 - << 'PYEOF'
+        import asyncio, os
+        from sqlalchemy.ext.asyncio import create_async_engine
+        from sqlalchemy import text
+        async def migrate():
+            engine = create_async_engine(os.environ['DATABASE_URL'])
+            async with engine.begin() as conn:
+                r = await conn.execute(text(
+                    "SELECT data_type FROM information_schema.columns"
+                    " WHERE table_name='devices' AND column_name='site'"
+                ))
+                row = r.fetchone()
+                if row and 'char' not in row[0].lower():
+                    await conn.execute(text(
+                        'ALTER TABLE devices ALTER COLUMN site'
+                        ' TYPE VARCHAR(64) USING site::text'
+                    ))
+                    await conn.execute(text('DROP TYPE IF EXISTS devicesiteenum'))
+                    await conn.execute(text('DROP TYPE IF EXISTS devicesit'))
+                    print('MIGRATED')
+                else:
+                    print('ALREADY_DONE')
+            await engine.dispose()
+        asyncio.run(migrate())
+        PYEOF
       register: site_migration
       changed_when: "'MIGRATED' in site_migration.stdout"
       failed_when: site_migration.rc != 0
