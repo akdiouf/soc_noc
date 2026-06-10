@@ -7,7 +7,7 @@ export type DeviceType =
   | "access_control" | "camera" | "smoke_detector"
   | "printer" | "other";
 
-export type DeviceSite = "primary" | "failover" | "both";
+export type DeviceSite = string;
 export type DeviceStatus = "up" | "down" | "warning" | "critical" | "unknown" | "maintenance";
 export type MonitoringProtocol = "snmp_v1" | "snmp_v2c" | "snmp_v3" | "modbus_tcp" | "modbus_rtu" | "bacnet_ip" | "rest_api" | "icmp" | "ssh" | "wmi" | "ipmi";
 

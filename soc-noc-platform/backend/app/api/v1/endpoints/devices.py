@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, func
 from app.core.database import get_db
-from app.models.device import Device, DeviceType, DeviceSite, DeviceStatus
+from app.models.device import Device, DeviceType, DeviceStatus
 from app.schemas.device import DeviceCreate, DeviceUpdate, DeviceResponse, DeviceListResponse
 from app.core.security import get_current_user
 from app.models.user import User, UserRole
@@ -14,7 +14,7 @@ router = APIRouter(prefix="/devices", tags=["Devices"])
 
 @router.get("", response_model=DeviceListResponse)
 async def list_devices(
-    site: Optional[DeviceSite] = None,
+    site: Optional[str] = None,
     device_type: Optional[DeviceType] = None,
     status: Optional[DeviceStatus] = None,
     is_monitored: Optional[bool] = None,
@@ -136,7 +136,7 @@ async def toggle_maintenance(
 
 @router.get("/summary/by-type")
 async def devices_by_type(
-    site: Optional[DeviceSite] = None,
+    site: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -150,7 +150,7 @@ async def devices_by_type(
 
 @router.get("/summary/by-status")
 async def devices_by_status(
-    site: Optional[DeviceSite] = None,
+    site: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):

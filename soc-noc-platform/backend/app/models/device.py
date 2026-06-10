@@ -43,12 +43,6 @@ class DeviceType(str, enum.Enum):
     OTHER = "other"
 
 
-class DeviceSite(str, enum.Enum):
-    PRIMARY = "primary"
-    FAILOVER = "failover"
-    BOTH = "both"
-
-
 class DeviceStatus(str, enum.Enum):
     UP = "up"
     DOWN = "down"
@@ -81,7 +75,7 @@ class Device(Base):
     ip_address = Column(String(45), nullable=False)
     mac_address = Column(String(17))
     device_type = Column(Enum(DeviceType), nullable=False)
-    site = Column(Enum(DeviceSite), default=DeviceSite.PRIMARY)
+    site = Column(String(64), default="primary")
     status = Column(Enum(DeviceStatus), default=DeviceStatus.UNKNOWN)
 
     # Identification matérielle

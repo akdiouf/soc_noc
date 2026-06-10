@@ -179,15 +179,24 @@ export function DeviceFormModal({ device, onClose }: Props) {
                       placeholder="192.168.1.1"
                     />
                   </Field>
-                  <Field label="Site *">
-                    <select
+                  <Field label="Site / Hébergeur *">
+                    <input
+                      list="site-suggestions"
                       value={form.site}
-                      onChange={(e) => set("site", e.target.value as DeviceSite)}
+                      onChange={(e) => set("site", e.target.value)}
                       className={input}
-                    >
-                      <option value="primary">Datacenter Principal</option>
-                      <option value="failover">Site de Repli</option>
-                    </select>
+                      placeholder="ex: contabo, ovh, primary..."
+                    />
+                    <datalist id="site-suggestions">
+                      <option value="contabo" />
+                      <option value="ovh" />
+                      <option value="hetzner" />
+                      <option value="aws" />
+                      <option value="azure" />
+                      <option value="gcp" />
+                      <option value="primary" />
+                      <option value="failover" />
+                    </datalist>
                   </Field>
                 </div>
                 <Field label="Type *">

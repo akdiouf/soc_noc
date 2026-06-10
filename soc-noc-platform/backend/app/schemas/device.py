@@ -2,7 +2,7 @@ from uuid import UUID
 from datetime import datetime
 from typing import Optional
 from pydantic import BaseModel, Field, IPvAnyAddress
-from app.models.device import DeviceType, DeviceSite, DeviceStatus, MonitoringProtocol
+from app.models.device import DeviceType, DeviceStatus, MonitoringProtocol
 
 
 class DeviceBase(BaseModel):
@@ -11,7 +11,7 @@ class DeviceBase(BaseModel):
     ip_address: str
     mac_address: Optional[str] = None
     device_type: DeviceType
-    site: DeviceSite = DeviceSite.PRIMARY
+    site: str = "primary"
     vendor: Optional[str] = None
     model: Optional[str] = None
     serial_number: Optional[str] = None
@@ -51,7 +51,7 @@ class DeviceUpdate(BaseModel):
     hostname: Optional[str] = None
     ip_address: Optional[str] = None
     device_type: Optional[DeviceType] = None
-    site: Optional[DeviceSite] = None
+    site: Optional[str] = None
     status: Optional[DeviceStatus] = None
     vendor: Optional[str] = None
     model: Optional[str] = None

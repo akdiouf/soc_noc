@@ -177,8 +177,8 @@ function UPSCard({ device }: { device: any }) {
         <div>Temp. batterie: <strong>{metrics?.temp !== null ? `${metrics?.temp}°C` : "—"}</strong></div>
         <div>Autonomie: <strong>{metrics?.runtime !== null ? `${Math.round((metrics?.runtime || 0) / 60)}min` : "—"}</strong></div>
         <div className="col-span-2">
-          Site: <span className={`font-medium ${device.site === "primary" ? "text-blue-600" : "text-purple-600"}`}>
-            {device.site === "primary" ? "Principal" : "Repli"}
+          Site: <span className="font-medium text-blue-600">
+            {device.site}
           </span>
           {device.rack && <span className="ml-3">Rack: {device.rack}</span>}
         </div>

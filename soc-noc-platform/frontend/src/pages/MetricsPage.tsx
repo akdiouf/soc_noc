@@ -88,7 +88,7 @@ export function MetricsPage() {
             <option value="">Sélectionner un équipement...</option>
             {(devicesData?.items || []).map((d: Device) => (
               <option key={d.id} value={d.id}>
-                {d.name} ({d.ip_address}) — {d.site === "primary" ? "Principal" : "Repli"}
+                {d.name} ({d.ip_address}) — {d.site}
               </option>
             ))}
           </select>

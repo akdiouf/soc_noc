@@ -28,7 +28,7 @@ const DEVICE_TYPE_ICON: Record<string, string> = {
 export function DevicesPage() {
   const qc = useQueryClient();
   const [search, setSearch] = useState("");
-  const [siteFilter, setSiteFilter] = useState<DeviceSite | "">("");
+  const [siteFilter, setSiteFilter] = useState<string>("");
   const [typeFilter, setTypeFilter] = useState<DeviceType | "">("");
   const [statusFilter, setStatusFilter] = useState<DeviceStatus | "">("");
   const [page, setPage] = useState(1);
@@ -160,12 +160,15 @@ export function DevicesPage() {
         </div>
         <select
           value={siteFilter}
-          onChange={(e) => { setSiteFilter(e.target.value as DeviceSite | ""); setPage(1); }}
+          onChange={(e) => { setSiteFilter(e.target.value); setPage(1); }}
           className="border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
         >
           <option value="">Tous les sites</option>
-          <option value="primary">Datacenter Principal</option>
-          <option value="failover">Site de Repli</option>
+          {Array.from(new Set((data?.items || []).map((d: Device) => d.site).filter(Boolean)))
+            .sort()
+            .map((s) => (
+              <option key={s} value={s}>{s}</option>
+            ))}
         </select>
         <select
           value={typeFilter}
@@ -237,12 +240,8 @@ export function DevicesPage() {
                 <td className="px-4 py-3 font-mono text-gray-700">{device.ip_address}</td>
                 <td className="px-4 py-3 text-gray-600">{DEVICE_TYPE_LABELS[device.device_type] || device.device_type}</td>
                 <td className="px-4 py-3">
-                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-                    device.site === "primary"
-                      ? "bg-blue-100 text-blue-800"
-                      : "bg-purple-100 text-purple-800"
-                  }`}>
-                    {device.site === "primary" ? "Principal" : "Repli"}
+                  <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-blue-100 text-blue-800">
+                    {device.site}
                   </span>
                 </td>
                 <td className="px-4 py-3 text-gray-600 text-xs">
